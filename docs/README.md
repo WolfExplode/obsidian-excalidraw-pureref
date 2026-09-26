@@ -28,6 +28,13 @@ find the right context before changing code or investigating behavior.
 | [investigations/](investigations/) | Evidence, experiments, and unresolved questions | Historical or exploratory; not automatically accepted behavior |
 | Root documents in this directory | Cross-cutting behavior and lifecycle material | Current unless marked otherwise |
 
+PureRef 2.x container and SQLite findings are summarized in the
+[format specification](pur-2x-format.md); the
+[investigation](investigations/pur-2x-format-investigation.md) preserves the
+experiments and superseded hypotheses.
+The import decision and current limitations are in
+[ADR 0011](adr/0011-import-pureref-2x-into-current-board.md).
+
 ## Common change routing
 
 | If your change involves | Read first |

@@ -1,10 +1,118 @@
 # PureRef 2.x `.pur` format — reverse-engineering notes
 
-Working notes from reverse-engineering PureRef 2.1.0.beta4's `.pur` file format,
-started per ADR 0006 (`docs/adr/0006-pur-interchange-targets-1x-format-only.md`),
-which requires 2.0+ compatibility before interchange work can proceed. This
-supersedes nothing yet — it's raw findings to inform a future ADR revision and
-implementation.
+Working notes from reverse-engineering PureRef 2.0.3 and 2.1.0.beta4 `.pur`
+files. The concise current specification is [here](../pur-2x-format.md).
+The resolution below supersedes the earlier hypotheses in this document about a
+truncated SQLite database and inaccessible image data. Those notes are retained
+as the experiment history.
+
+## Resolution: the complete SQLite database is rotated (2026-09-26)
+
+The saved `.pur` file contains a **complete, valid SQLite database**, split at
+one point and stored in rotated order. Let `T = 108 + thumbnail_length` (the
+end of the PureRef header and thumbnail) and `D = file_size - T` (the SQLite
+database size). The byte layout is:
+
+```
+[0:T)        PureRef header, thumbnail length, thumbnail JPEG
+[T:D)        SQLite database bytes [T:D)
+[D:D+T)      SQLite database bytes [0:T) — starts with "SQLite format 3\0"
+```
+
+To reconstruct the database, concatenate `file[D:] + file[T:D]`. The SQLite
+header's `size_in_pages × page_size` equals `D` because it describes the
+**entire database**, not the short trailing segment. The earlier observed
+`file_size − D == T` is exactly the rotation's other half. The image signatures
+in the middle are ordinary SQLite BLOB payloads; the apparent 32 KiB image
+framing was caused by reading database pages as a contiguous PNG stream.
+The header also stores `D` directly as a big-endian `u64` at bytes 14–21;
+bytes 12–13 are zero in tested samples. This resolves the formerly unknown
+header bytes 16–21, which were the nonzero low bytes of this size field.
+
+This reconstruction passed `PRAGMA integrity_check = ok` for empty, one-image,
+two-image, five-image, and 74-image (116 MB) samples from 2.1.0.beta4, plus
+one-image, two-image, and cropped two-image files saved by PureRef 2.0.3.
+The 74-image sample yielded 74
+rows each in `images`, `items`, and `items_images`. All 74 `images.data` BLOBs
+matched their stored MD5 checksums. The one-image BLOB was byte-identical to
+its source PNG. No PureRef installation, AutoSave file, `.recover`, or schema
+patch is needed to read the saved file. A standalone extractor is at
+`scripts/pur2_extract.py`:
+
+```
+python scripts/pur2_extract.py input.pur output_directory
+```
+
+It writes `scene.sqlite`, the original image bytes, and `summary.json` with
+image dimensions, item links, decoded transforms, image-bound path points, and
+the corresponding polygon in source pixel coordinates.
+It verifies the PureRef
+payload MD5, SQLite integrity, and each image's MD5. Current validation covers
+PureRef 2.0.3 and 2.1.0.beta4; non-image item types still need a sample matrix.
+
+### Transform encoding
+
+Several columns declared `BLOB` have SQLite `TEXT` storage class. Read their
+UTF-8 bytes, decode as UTF-8, then encode the resulting code points as Latin-1
+to recover the original binary Qt stream. For `items.transform` and
+`items_images.image_transform`, the recovered value is 77 bytes: a four-byte
+big-endian `0x50` marker, one zero byte, then nine big-endian IEEE-754 doubles
+in Qt `QTransform` order. The one-image sample decodes to
+`[1,0,0, 0,1,0, 122,78,1]`; its image transform is
+`[1,0,0, 0,1,0, -471,-488.5,1]`. These agree exactly with the legacy 1.x
+cross-reference position and half-extents. The moved/resized sample retains
+this layout, with scale `1.7146481012351962` and translation
+`(1563.704639204083, -270.85569740279516)` in `items.transform`.
+
+`items_images.image_bounds` begins with `00 00 04 00 00 00 00 00`, then a
+one-byte tag length and null-terminated `QPainterPath` tag, a big-endian
+`u32` point count, and that many 20-byte points. Each point is a big-endian
+`u32` type and two big-endian doubles `(x, y)`. Eight bytes follow the points,
+zero in the tested samples. The default image has five points tracing its
+`(-471,-488.5)` to `(471,488.5)` rectangle and returning to the start.
+
+The path is a clip in item coordinates; apply the inverse of
+`items_images.image_transform` to its points to obtain the visible polygon in
+source image pixels. A separately supplied two-image 2.1 file confirms this:
+one 1080×1080 JPEG maps to the full `(0,0)`–`(1080,1080)` source rectangle;
+the other maps to approximately `x=299.658..1080`, `y=381.737..661.212`.
+PureRef's own `exportImages` command with cropping enabled exports these as
+1080×1080 and 781×280 images respectively, matching the predicted bounds
+after rounding. PureRef 2.0.3 reopened and resaved this file with identical
+decoded crop points. The path type enum, `sort_order`'s `BigRational` stream,
+and drawing payload remain to be decoded.
+
+### 2.0.3 note and group specimens
+
+A note created in a scratch 2.0.3 scene produced an `items_notes` row joined
+to its base `items` row by `id`. Its `text` is Qt rich-text HTML. Its
+`fixed_size` decodes to marker `0x16`, one zero byte, and two big-endian
+doubles `(-1,-1)` for automatic sizing. A separate two-image scene grouped
+in 2.0.3 produced an `items_groups` row plus a base group item; both image
+items' `parent` fields changed to the group ID. Both saved files reconstruct
+into SQLite databases with `PRAGMA integrity_check = ok`.
+
+A 2.0.3 animated GIF specimen kept the GIF source bytes unchanged in
+`images.data` (`format='gif'`). Its `items_images.playback_state=3`, compared
+with `0` in the still-image specimens; `playback_speed=1.0`,
+`playback_frame=0`, and `flags=1` in both. These observations do not yet define
+the playback-state enum.
+
+### Standalone repacking proof
+
+An edited 2.0.3 SQLite database was rotated back into a `.pur` container,
+with header database size and payload MD5 recomputed by
+`scripts/pur2_repack.py`. The image item's X translation was changed from
+`0` to `222`. PureRef 2.0.3 loaded this independently repacked file and saved
+it again; extracting PureRef's output showed the X translation still `222`.
+The front thumbnail matches `metadata.thumbnail` byte-for-byte in all sampled
+files. The repacker now copies that BLOB into the front block; swapping in a
+different-length JPEG still produced a file that 2.0.3 reopened and resaved.
+If the BLOB itself is stale after a scene edit, the preview remains stale until
+PureRef regenerates it. This validates the container write path for an
+existing scene; constructing all item types from scratch remains separate work.
+
+## Historical investigation (superseded by the resolution above)
 
 Method: PureRef 2.1.0.beta4 is installed locally
 (`C:\Program Files\PureRef\PureRef.exe`). A controlled matrix of minimal `.pur`

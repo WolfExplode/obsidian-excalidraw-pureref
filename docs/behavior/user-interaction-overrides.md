@@ -33,7 +33,7 @@ to a normal move so it cannot duplicate a newly clicked element.
 | **G** / **R** / **S** with selected elements | Starts a Blender-style move, rotation, or uniform scale around the selection center. Move to preview; left-click or Enter commits; Esc or right-click cancels. Hold **Shift** during rotation to snap to 15° increments. The transform runs through Excalidraw's native pointer pipeline, so bound text, connected arrows, frames, snapping, and other element relationships behave like a mouse transform. | Normal view and editable Popout. See [Excalidraw shortcut interception](../integrations/excalidraw-shortcut-interception.md) for how this shadows Excalidraw's own G/R/S bindings, verified live through community plugin 2.27.3. |
 | **R** without a selection | Does not select the Rectangle tool. Excalidraw's **2** shortcut remains available. | Normal view and editable Popout. |
 | **Alt+R** | Resets selected elements' rotation to 0, each element turning about its own center. With no selection it is a harmless no-op. The host plugin owns the key only while a Board is active, so another Alt+R command (such as Templater's) remains available everywhere else. | Normal view and editable Popout. See [Obsidian hotkey interception](../integrations/obsidian-hotkey-interception.md). |
-| **Alt+S** with selected images | Resets each image to 100% scale — its native pixel size — about its own center. A natively cropped image resets to its visible crop, never re-exposing cropped-away content. Rotation and flips are preserved. | Normal view and editable Popout. |
+| **Alt+S** with selected images | Resets each image to 25% of its native pixel size about its own center. A natively cropped image uses 25% of its visible crop, never re-exposing cropped-away content. Rotation and flips are preserved. | Normal view and editable Popout. |
 | **Alt+S** otherwise | Does nothing. Excalidraw's "toggle object snap" shortcut is dropped because it also force-disables grid mode; toggle object snap from the canvas context menu instead. | Normal view and editable Popout. |
 | **X** | Deletes the selected elements. | Replaces Excalidraw's **X** shortcut for the free-draw tool. Normal Excalidraw deletion rules, including frames, bindings, and groups, still apply. |
 | **Ctrl+Alt+Left** / **Right** with two or more images selected | Resizes the selected images, centered in place, to their average displayed height / width. | Normal view and editable Popout. Also available from the canvas context menu: **Normalize → Height / Width**. |
@@ -81,6 +81,10 @@ setting globally, the normal Board view is affected for that interval too.
 
 ## Import and media behavior
 
+- Dropping one or more `.pur` files onto an editable Board offers **Import all
+  media** or **Link file**. Import reads the dropped files into the Board using
+  the same PureRef 2.x importer as the command palette; Link file passes the
+  drop to Excalidraw's existing file-link path. Closing the prompt does nothing.
 - The plugin sanitizes dropped attachment filenames that cannot safely appear in
   Obsidian wikilinks, then passes the drop through Excalidraw's normal importer.
   This works around an Obsidian vault-naming limitation, not an Excalidraw
