@@ -62,7 +62,14 @@ export const desanitizeAttachmentName = (name: string): string =>
  *   carries a filename needing sanitization, and otherwise leave Excalidraw's
  *   path untouched.
  */
-export function attachPopoutDropBridge(doc: Document, { alwaysBridge = true }: { alwaysBridge?: boolean } = {}): () => void {
+export function attachPopoutDropBridge(doc: Document, {
+	alwaysBridge = true,
+	onPureRefDrop,
+}: {
+	alwaysBridge?: boolean;
+	/** Return true after opening the choice prompt; link replays the captured drop. */
+	onPureRefDrop?: (event: DragEvent, files: readonly File[], link: () => void) => boolean;
+} = {}): () => void {
 	const win = doc.defaultView ?? window;
 	// The main window whose realm owns the constructors Excalidraw checks against.
 	const mainWindow = window;
@@ -107,24 +114,22 @@ export function attachPopoutDropBridge(doc: Document, { alwaysBridge = true }: {
 		if (!isBridgeable(event)) return;
 		const dt = event.dataTransfer;
 		if (!dt) return;
+		const droppedFiles = Array.from(dt.files);
+		const pureRefOnly = droppedFiles.every((file) => /\.pur$/i.test(file.name));
 
 		// In the main window Excalidraw's native import already works, so only
 		// intervene when a dropped filename actually carries a wikilink-unsafe
 		// character; otherwise fall through to Excalidraw untouched. (Popouts
 		// always bridge — the cross-realm clone is required regardless of name.)
-		if (!alwaysBridge && !Array.from(dt.files).some((file) => sanitizeAttachmentName(file.name) !== file.name)) {
+		if (!pureRefOnly && !alwaysBridge && !droppedFiles.some((file) => sanitizeAttachmentName(file.name) !== file.name)) {
 			return;
 		}
-
-		// Take over from Excalidraw's (about-to-fail) native handler.
-		event.preventDefault();
-		event.stopImmediatePropagation();
 
 		// The DataTransfer is only readable synchronously inside the handler, so
 		// snapshot everything now: each file with its resolved OS path (webUtils
 		// must be queried while the drop is live), and every non-file string
 		// payload. The file blobs survive past the event; the path lookup may not.
-		const files = Array.from(dt.files).map((file) => ({ file, path: resolveFilePath(file) }));
+		const files = droppedFiles.map((file) => ({ file, path: resolveFilePath(file) }));
 		const strings: Array<[string, string]> = [];
 		for (const type of Array.from(dt.types)) {
 			if (type === "Files") continue;
@@ -154,7 +159,22 @@ export function attachPopoutDropBridge(doc: Document, { alwaysBridge = true }: {
 			metaKey: event.metaKey,
 		};
 
-		void redispatch(files, strings, target, init);
+		const link = () => { void redispatch(files, strings, target, init); };
+		if (pureRefOnly && onPureRefDrop?.(event, droppedFiles, link)) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			// Excalidraw's onDrop normally removes its drag-info box. We consumed
+			// that drop, so run its onDragLeave cleanup on the same Board wrapper.
+			target?.closest(".excalidraw-wrapper")?.dispatchEvent(
+				new win.DragEvent("dragleave", { bubbles: true }),
+			);
+			return;
+		}
+		if (!alwaysBridge && !droppedFiles.some((file) => sanitizeAttachmentName(file.name) !== file.name)) return;
+		// Take over from Excalidraw's (about-to-fail) native handler.
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		link();
 	};
 
 	const redispatch = async (

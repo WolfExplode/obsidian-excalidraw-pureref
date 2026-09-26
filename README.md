@@ -26,7 +26,7 @@ https://github.com/user-attachments/assets/b30dba76-fb94-49ec-b3e8-ca915fdcafd4
   - **Alt+double-click** to remove a crop. Double-click a custom-cropped image
     to open Excalidraw's native crop editor.
   - Blender-style **G** / **R** / **S** move, rotate, and scale. 
-  - **Alt+R** / **Alt+S** to reset rotation or scale back to native size.
+  - **Alt+R** to reset rotation; **Alt+S** to set image scale to 25% of native size.
 
 https://github.com/user-attachments/assets/fda37d9a-c42b-4f69-adbe-68710d3f4a9d
 
@@ -44,6 +44,11 @@ https://github.com/user-attachments/assets/fda37d9a-c42b-4f69-adbe-68710d3f4a9d
 https://github.com/user-attachments/assets/6c0136df-f822-4b36-8e56-7852c0023c16
 
 ### **Media import/export**
+  - Open a Board and run **Import PureRef 2.x file into current Board** from
+    the Obsidian command palette to choose a `.pur` file. Image attachments
+    go to the location configured in Obsidian's attachment settings.
+  - Drop a `.pur` file onto a Board to choose between importing its media and
+    linking the file as usual.
   - **Ctrl+Shift+E** exports every selected image/video/embed to a folder,
     rendering cropped images to a fresh PNG of just the visible crop.
 
@@ -86,7 +91,9 @@ For contributor workflow and repository-specific guardrails, see [AGENTS.md](AGE
 ### Current status
 As the plugin is now, it's fully functional as a reference board, but still lacks some of the features that make pureref, pureref. (The transparent read-only Popout mode was the only way I managed to get some of the transparency features to render properly, if it feels clunky to use... I know.)
 
-`.pur` file import/export is not supported. PureRef's file format changed between its 1.x and 2.x releases, and the 2.x format was not able to be reverse engineered, so interchange is limited to the Board's native `.excalidraw` file.
+PureRef 2.0/2.1 image placements and notes can be imported from `.pur` files.
+Pen strokes, editable group structure, and rich note styling are not imported.
+PureRef 1.x import and `.pur` export are not yet implemented.
 
 ### Limitations
 

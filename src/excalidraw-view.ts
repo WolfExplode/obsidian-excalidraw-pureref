@@ -874,6 +874,8 @@ export function makeNaturalSizeResolver(win: Window, files: Record<string, { dat
 
 /** A size this close to the target is already reset — leave it alone. */
 const SCALE_RESET_EPSILON = 0.01;
+/** Native-image display scale shared by Alt+S and PureRef scene import. */
+export const DEFAULT_IMAGE_SCALE = 0.25;
 
 /**
  * Clears every selected element's rotation (Blender's Alt+R). Excalidraw rotates
@@ -892,11 +894,10 @@ export function resetSelectedRotation(leaf: WorkspaceLeaf | null): boolean {
 }
 
 /**
- * Resets every selected image to 100% scale — its native pixel size (Blender's
- * Alt+S).
+ * Resets every selected image to 25% of its native pixel size (Blender's Alt+S).
  *
- * A natively cropped image resets to its *visible* crop measured in natural
- * pixels, never the whole file, so the reset cannot re-expose cropped-away
+ * A natively cropped image uses its *visible* crop measured in natural pixels,
+ * never the whole file, so the reset cannot re-expose cropped-away
  * content (that stays Excalidraw's double-click uncrop). Rotation and flips
  * (`scale: [-1, 1]`) are deliberately preserved — this restores size only —
  * and each image resizes about its own centre. One undoable step.
@@ -929,17 +930,18 @@ export async function resetSelectedImageScale(leaf: WorkspaceLeaf | null): Promi
 	for (const el of targets) {
 		// A native crop already records its visible size in natural pixels, so only
 		// an uncropped image needs its file decoded.
-		const target = el.crop
+		const natural = el.crop
 			? { w: el.crop.width, h: el.crop.height }
 			: el.fileId
 				? await naturalSizeOf(el.fileId)
 				: null;
-		if (!target || target.w <= 0 || target.h <= 0) continue;
+		if (!natural || natural.w <= 0 || natural.h <= 0) continue;
+		const target = { w: natural.w * DEFAULT_IMAGE_SCALE, h: natural.h * DEFAULT_IMAGE_SCALE };
 		if (
 			Math.abs(el.width - target.w) <= SCALE_RESET_EPSILON * target.w &&
 			Math.abs(el.height - target.h) <= SCALE_RESET_EPSILON * target.h
 		) {
-			continue; // already at 100%
+			continue; // already at the default scale
 		}
 		const cx = el.x + el.width / 2;
 		const cy = el.y + el.height / 2;

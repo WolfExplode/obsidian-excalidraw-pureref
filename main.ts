@@ -4,6 +4,7 @@ import { PopoutManager } from "src/popout-manager";
 import { ExcalidrawPureRefSettingTab } from "src/settings-tab";
 import { getActiveExcalidrawFile, getActiveExcalidrawLeaf } from "src/excalidraw-view";
 import { exportSelectedMedia } from "src/media-export";
+import { importPureRefFile, promptPureRefDrop } from "src/pur2-import";
 import { attachBoardGestures } from "src/board-gestures";
 import { attachPopoutDropBridge } from "src/popout-drop-bridge";
 import { attachInsertModalAutoConfirm } from "src/insert-modal-autoconfirm";
@@ -83,7 +84,10 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 		// Keep a multi-file import compact, like PureRef. The observer only packs
 		// media newly created by an import; it seeds existing Board content first.
 		this.register(attachMediaAutoPack(this));
-		this.register(attachPopoutDropBridge(window.document, { alwaysBridge: false }));
+		this.register(attachPopoutDropBridge(window.document, {
+			alwaysBridge: false,
+			onPureRefDrop: (event, files, link) => promptPureRefDrop(this, event, files, link),
+		}));
 		// Makes elements already in front of an embeddable per scene z-order
 		// actually render in front of it, by copying Excalidraw's own static canvas
 		// onto a DOM overlay through a mask of those elements' shapes -- see
@@ -179,6 +183,18 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 				if (!leaf) return false;
 				if (checking) return true;
 				void exportSelectedMedia(this.app, leaf);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "import-pureref-file",
+			name: "Import PureRef 2.x file into current Board",
+			checkCallback: (checking) => {
+				const leaf = this.app.workspace.getMostRecentLeaf();
+				if (!getActiveExcalidrawFile(this.app) || !leaf) return false;
+				if (checking) return true;
+				void importPureRefFile(this, leaf, leaf.view.containerEl.ownerDocument.defaultView ?? window);
 				return true;
 			},
 		});

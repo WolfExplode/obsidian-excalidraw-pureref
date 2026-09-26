@@ -47,7 +47,7 @@ interface ElectronOpenDialogResult {
 interface ElectronDialog {
 	showOpenDialog(
 		win: ElectronBrowserWindow | null,
-		options: { title?: string; properties?: string[] },
+		options: { title?: string; properties?: string[]; filters?: Array<{ name: string; extensions: string[] }> },
 	): Promise<ElectronOpenDialogResult>;
 }
 
@@ -212,6 +212,19 @@ export async function pickDirectoryForDomWindow(target: Window | null, title: st
 	} catch {
 		return null;
 	}
+}
+
+/** Choose an external PureRef file from the window that invoked the command. */
+export async function pickPureRefFileForDomWindow(target: Window | null): Promise<string | null> {
+	const remoteModule = resolveRemoteModuleForDomWindow(target);
+	if (!remoteModule?.dialog?.showOpenDialog) return null;
+	const owner = remoteModule.getCurrentWindow?.() ?? null;
+	const result = await remoteModule.dialog.showOpenDialog(owner, {
+		title: "Import PureRef file",
+		properties: ["openFile"],
+		filters: [{ name: "PureRef scene", extensions: ["pur"] }],
+	});
+	return result.canceled ? null : result.filePaths[0] ?? null;
 }
 
 export function adjustWindowOpacityById(id: number, delta: number): number | null {
