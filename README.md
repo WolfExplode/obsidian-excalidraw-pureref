@@ -41,7 +41,7 @@ https://github.com/user-attachments/assets/fda37d9a-c42b-4f69-adbe-68710d3f4a9d
     **Ctrl+[**) jumps past non-overlapping elements instead of one slot at a
     time.
 
-https://github.com/user-attachments/assets/6c0136df-f822-4b36-8e56-7852c0023c16
+<img width="800" height="453" alt="Image Manipulation" src="https://github.com/user-attachments/assets/336990ed-c6e8-4e14-bbe2-c9ae7ebd5588" />
 
 ### **Media import/export**
   - Open a Board and run **Import PureRef file into current Board** from
