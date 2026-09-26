@@ -724,6 +724,13 @@ export function installTransformProxy(
 	try {
 		view.updateScene({
 			elements: [...api.getSceneElements(), proxy],
+			captureUpdate: "EVENTUALLY",
+			commitToHistory: false,
+		});
+		// Recent Excalidraw builds discard selection ids for elements that were
+		// absent before an elements+appState update. Select the proxy only after
+		// the element insertion has reached the live scene.
+		view.updateScene({
 			appState: {
 				selectedElementIds: Object.fromEntries([...selectedIds, id].map((elementId) => [elementId, true])),
 				// Excalidraw deliberately blocks selected-element dragging while an
@@ -765,6 +772,10 @@ export function removeTransformProxyEventually(
 	try {
 		view.updateScene({
 			elements: api.getSceneElements().filter((element) => element.id !== id),
+			captureUpdate: "EVENTUALLY",
+			commitToHistory: false,
+		});
+		view.updateScene({
 			appState: { selectedElementIds: Object.fromEntries(selectedIds.map((elementId) => [elementId, true])) },
 			captureUpdate: "EVENTUALLY",
 			commitToHistory: false,

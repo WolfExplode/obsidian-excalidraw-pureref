@@ -52,11 +52,6 @@ interface ActiveTransform {
 /** Events emitted by this bridge must reach Excalidraw, not be recaptured by us. */
 const forwardedEvents = new WeakSet<Event>();
 let active: ActiveTransform | null = null;
-let lastPointer: {
-	leaf: NonNullable<ReturnType<typeof findExcalidrawLeafForNode>>;
-	x: number;
-	y: number;
-} | null = null;
 
 function rotate(point: ScenePoint, pivot: ScenePoint, radians: number): ScenePoint {
 	const dx = point.x - pivot.x;
@@ -183,7 +178,6 @@ function releaseStateForDocument(doc: Document): void {
 		active.cursorDoc.body.style.removeProperty("cursor");
 		active = null;
 	}
-	if (lastPointer && isStale(lastPointer.leaf)) lastPointer = null;
 }
 
 /**
@@ -210,7 +204,10 @@ export function attachTransformKeydown(win: Window, app: App, hotkeys: HotkeySto
 				return;
 			}
 			expected.proxyReady = true;
-			if (!expected.physicalStart) return;
+			// Motion while Excalidraw was inserting the proxy is not a reliable
+			// drag origin. Start from the latest post-key pointer position instead.
+			if (expected.physicalCurrent) expected.physicalStart = expected.physicalCurrent;
+			if (!expected.physicalStart && !(expected.mode === "scale" && expected.numericInput)) return;
 			beginGesture(expected);
 		};
 		expected.cursorDoc.defaultView?.requestAnimationFrame(frame);
@@ -320,10 +317,9 @@ export function attachTransformKeydown(win: Window, app: App, hotkeys: HotkeySto
 		const proxyId = installTransformProxy(leaf, { x: x1, y: y1, width: x2 - x1, height: y2 - y1 }, selectedIds);
 		if (!proxyId) return;
 		const nativeOrigin = transformOrigin(mode, elements, zoom);
-		const pointer = lastPointer?.leaf === leaf ? clientToSceneCoords(leaf, lastPointer.x, lastPointer.y) : null;
 		active = {
-			mode, leaf, elements, baseline, pivot: selectionPivot(elements), physicalStart: pointer,
-			physicalCurrent: pointer, latestShiftKey: false,
+			mode, leaf, elements, baseline, pivot: selectionPivot(elements), physicalStart: null,
+			physicalCurrent: null, latestShiftKey: false,
 			nativeOrigin, nativeCurrent: nativeOrigin, numericInput: "", canvas, cursorDoc,
 			hasGesture: false, nativeDragReady: false, proxyReady: false, proxyId, selectedIds, finishing: false,
 		};
@@ -339,9 +335,9 @@ export function attachTransformKeydown(win: Window, app: App, hotkeys: HotkeySto
 
 	const onPointerMove = (event: PointerEvent) => {
 		if (forwardedEvents.has(event)) return;
-		const leaf = findExcalidrawLeafForNode(app, event.target as Node | null);
-		if (leaf) lastPointer = { leaf, x: event.clientX, y: event.clientY };
-		if (!active) return;
+		// The Alt-drag bridge replays a trusted mouse move with Alt stripped;
+		// accept only that known replay, not arbitrary synthetic pointer motion.
+		if (!active || (!event.isTrusted && !(event as PointerEvent & { __eprAltDragRelayed?: boolean }).__eprAltDragRelayed)) return;
 		const targetDoc = (event.target as Node | null)?.ownerDocument;
 		if (targetDoc !== active.cursorDoc) return;
 		event.preventDefault();
@@ -353,13 +349,20 @@ export function attachTransformKeydown(win: Window, app: App, hotkeys: HotkeySto
 		if (active.finishing) return;
 		const current = clientToSceneCoords(active.leaf, event.clientX, event.clientY);
 		if (!current) return;
-		active.physicalCurrent = current;
-		active.latestShiftKey = event.shiftKey;
 		if (!active.physicalStart) {
+			// The first pointer sample after the key press defines zero motion.
+			// Require it to be over this Board, not a toolbar or another leaf.
+			const rect = active.canvas.getBoundingClientRect();
+			if (event.clientX < rect.left || event.clientX > rect.right ||
+				event.clientY < rect.top || event.clientY > rect.bottom) return;
 			active.physicalStart = current;
+			active.physicalCurrent = current;
+			active.latestShiftKey = event.shiftKey;
 			if (active.proxyReady) beginGesture(active);
 			return;
 		}
+		active.physicalCurrent = current;
+		active.latestShiftKey = event.shiftKey;
 		if (active.mode === "scale" && active.numericInput) return;
 		active.nativeCurrent = targetForPointer(active, current);
 		if (active.proxyReady) {

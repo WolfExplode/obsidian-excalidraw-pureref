@@ -11,9 +11,10 @@ move/rotate/scale) and the Alt+S reset, all implemented in
 command implemented separately in
 [rotation-reset-hotkey.ts](../../src/rotation-reset-hotkey.ts).
 
-This contract targets Excalidraw core 0.18.0 as bundled by
-obsidian-excalidraw-plugin 2.25.3. Shortcut wiring is not public; re-check the
-matching source under `reference/excalidraw-master` after an upstream upgrade.
+This contract was built against Excalidraw core 0.18.0 as bundled by
+obsidian-excalidraw-plugin 2.25.3 and verified live against community plugin
+2.27.3. Shortcut wiring is not public; re-check the matching source under
+`reference/excalidraw-master` after an upstream upgrade.
 
 ## Why a DOM capture-phase listener *does* work here
 
@@ -74,6 +75,14 @@ pointer-up captures it. Gesture start polls the observable scene/selection state
 on animation frames and does not dispatch pointer-down until Excalidraw reports
 the proxy ready; this is a data condition, not a timing delay.
 
+In community plugin 2.27.3, sending a newly inserted proxy and its selection
+in the same `updateScene` call leaves the proxy present but unselected. The
+readiness check then never passes, so G/R/S appears to lag without moving.
+Insert the proxy first, then set `selectedElementIds` in a second ordered
+`updateScene` call. Removal likewise removes the proxy before restoring the
+original selection. A live keydown/scene trace verified the proxy was selected
+on the next frame and the native pointer stream resumed.
+
 An active iframe/embeddable is another required precondition. Excalidraw's own
 drag branch explicitly refuses to move selected elements while
 `activeEmbeddable.state === "active"`; without normalizing it, the same valid
@@ -87,6 +96,13 @@ Excalidraw/React batches the pointer-down state that installs the drag. Sending 
 move synchronously after down intermittently routes that move through the
 selection tool instead, producing a marquee even though Excalidraw reported the
 proxy and common selection box as hit.
+
+The pointer origin must come from a trusted pointer movement over the Board
+after G/R/S starts. A cached pre-key pointer event can be old or can belong to
+another part of the window; using it as the origin makes the first real move
+produce a large translation, scale, or rotation. If the pointer moves while the
+proxy is still being inserted, rebase the origin to the latest position when
+the proxy becomes ready. The first sample after readiness is zero motion.
 
 Excalidraw throttles its pointer-move handler to an animation frame. Commit and
 cancel issue the final virtual position first, then the pointer-up on the next
