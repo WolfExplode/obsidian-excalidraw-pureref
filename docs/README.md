@@ -33,7 +33,8 @@ PureRef 2.x container and SQLite findings are summarized in the
 [investigation](investigations/pur-2x-format-investigation.md) preserves the
 experiments and superseded hypotheses.
 The import decision and current limitations are in
-[ADR 0011](adr/0011-import-pureref-2x-into-current-board.md).
+[ADR 0011](adr/0011-import-pureref-2x-into-current-board.md) and
+[ADR 0012](adr/0012-import-pureref-1x-into-current-board.md).
 
 ## Common change routing
 

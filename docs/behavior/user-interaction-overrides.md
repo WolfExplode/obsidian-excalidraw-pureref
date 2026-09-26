@@ -83,7 +83,7 @@ setting globally, the normal Board view is affected for that interval too.
 
 - Dropping one or more `.pur` files onto an editable Board offers **Import all
   media** or **Link file**. Import reads the dropped files into the Board using
-  the same PureRef 2.x importer as the command palette; Link file passes the
+  the same PureRef 1.x/2.x importer as the command palette; Link file passes the
   drop to Excalidraw's existing file-link path. Closing the prompt does nothing.
 - The plugin sanitizes dropped attachment filenames that cannot safely appear in
   Obsidian wikilinks, then passes the drop through Excalidraw's normal importer.

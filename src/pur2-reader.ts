@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import initSqlJs from "sql.js/dist/sql-asm-memory-growth.js";
+import { readPureRef1Scene } from "./pur1-reader";
 
 export type Point = { x: number; y: number };
 export type Matrix = [number, number, number, number, number, number, number, number, number];
@@ -139,6 +140,9 @@ export function databaseFromPur(data: Uint8Array): Uint8Array {
 let sqlPromise: Promise<{ Database: new (data: Uint8Array) => SqlDatabase }> | null = null;
 
 export async function readPureRefScene(data: Uint8Array): Promise<PureRefScene> {
+	if (data.length >= 12 && new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0, false) === 8) {
+		return readPureRef1Scene(data);
+	}
 	const databaseBytes = databaseFromPur(data);
 	sqlPromise ??= initSqlJs() as Promise<{ Database: new (data: Uint8Array) => SqlDatabase }>;
 	const SQL = await sqlPromise;

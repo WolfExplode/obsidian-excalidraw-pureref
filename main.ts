@@ -189,7 +189,7 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 
 		this.addCommand({
 			id: "import-pureref-file",
-			name: "Import PureRef 2.x file into current Board",
+			name: "Import PureRef file into current Board",
 			checkCallback: (checking) => {
 				const leaf = this.app.workspace.getMostRecentLeaf();
 				if (!getActiveExcalidrawFile(this.app) || !leaf) return false;
