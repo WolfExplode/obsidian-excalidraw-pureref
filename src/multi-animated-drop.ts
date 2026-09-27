@@ -1,6 +1,7 @@
 import type { TFile, WorkspaceLeaf } from "obsidian";
 import type ExcalidrawPureRefPlugin from "../main";
 import { readSceneElements } from "./excalidraw-view";
+import { randomVersionNonce } from "./excalidraw-element-mutation";
 
 const ANIMATED_EXTENSIONS = new Set(["gif", "webp", "apng"]);
 
@@ -8,6 +9,10 @@ interface ImportedImage {
 	id: string;
 	type: string;
 	fileId?: string | null;
+	isDeleted?: boolean;
+	version?: number;
+	versionNonce?: number;
+	updated?: number;
 	x: number;
 	y: number;
 	width: number;
@@ -17,7 +22,9 @@ interface ImportedImage {
 interface ExcalidrawAutomateLike {
 	addEmbeddable(x: number, y: number, width: number, height: number, url?: string, file?: TFile): string | null;
 	addElementsToView(repositionToCursor?: boolean, save?: boolean, newElementsOnTop?: boolean): Promise<boolean>;
-	deleteViewElements(elements: Array<{ id: string }>): boolean;
+	clear(): void;
+	copyViewElementsToEAforEditing(elements: readonly ImportedImage[]): void;
+	getElement(id: string): ImportedImage | undefined;
 	destroy(): void;
 }
 
@@ -54,26 +61,43 @@ export async function convertMultiDropAnimatedImage(
 	const ea = getExcalidrawAutomate(plugin, leaf.view);
 	if (!ea) return null;
 	let embeddableId: string | null = null;
-	const removeUncommittedEmbed = () => {
+	const retire = async (element: ImportedImage): Promise<boolean> => {
+		// A hard removal from the live array lets a pending import snapshot
+		// resurrect the image. The host's merge needs a saved tombstone.
+		ea.clear();
+		ea.copyViewElementsToEAforEditing([element]);
+		const copy = ea.getElement(element.id);
+		if (!copy) return false;
+		copy.isDeleted = true;
+		copy.version = (element.version ?? 1) + 1;
+		copy.versionNonce = randomVersionNonce();
+		copy.updated = Date.now();
+		if (!await ea.addElementsToView(false, true, true)) return false;
+		const api = (leaf.view as unknown as {
+			excalidrawAPI?: { getSceneElementsIncludingDeleted?: () => readonly ImportedImage[] };
+		}).excalidrawAPI;
+		return api?.getSceneElementsIncludingDeleted?.().some((raw) => raw.id === element.id && raw.isDeleted) === true;
+	};
+	const removeUncommittedEmbed = async () => {
 		if (!embeddableId) return;
-		const embed = (readSceneElements(leaf) ?? []).find((raw) => (raw as { id?: string }).id === embeddableId) as { id: string } | undefined;
-		if (embed) ea.deleteViewElements([embed]);
+		const embed = (readSceneElements(leaf) ?? []).find((raw) => (raw as { id?: string }).id === embeddableId) as ImportedImage | undefined;
+		if (embed) await retire(embed);
 	};
 	try {
 		embeddableId = ea.addEmbeddable(image.x, image.y, image.width, image.height, undefined, file);
 		if (!embeddableId || !await ea.addElementsToView(false, true, true)) return null;
 		const current = (readSceneElements(leaf) ?? []).find((raw) => (raw as ImportedImage).id === imageId) as ImportedImage | undefined;
 		if (!current || current.type !== "image" || current.fileId !== fileId) {
-			removeUncommittedEmbed();
+			await removeUncommittedEmbed();
 			return null;
 		}
-		if (!ea.deleteViewElements([current]) || (readSceneElements(leaf) ?? []).some((raw) => (raw as ImportedImage).id === imageId)) {
-			removeUncommittedEmbed();
+		if (!await retire(current) || (readSceneElements(leaf) ?? []).some((raw) => (raw as ImportedImage).id === imageId)) {
+			await removeUncommittedEmbed();
 			return null;
 		}
 		return embeddableId;
 	} catch (error) {
-		removeUncommittedEmbed();
+		await removeUncommittedEmbed();
 		console.error("[Excalidraw PureRef] failed to convert a multi-drop animated image.", error);
 		return null;
 	} finally {

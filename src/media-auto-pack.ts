@@ -10,11 +10,10 @@ import { convertMultiDropAnimatedImage } from "./multi-animated-drop";
 /**
  * Packs imported media only after every file in an observed import transaction
  * has produced its matching scene element. Drop/paste handlers provide the
- * transaction's expected files; scene changes provide the authoritative commit
- * signal — packing waits for the importer's own `synchronizeWithData` call to
- * resolve, not a debounce timer. FALLBACK_PACK_MS below is the one deliberate
- * exception, for import paths that never call synchronizeWithData at all; see
- * its comment for why a timer is unavoidable there.
+ * transaction's expected files; scene changes tell us when they all exist.
+ * Packing waits for the host's outstanding saves and synchronizations to
+ * finish, including those started while converting animated images. A fallback
+ * covers import paths without an observable save or synchronization.
  *
  * The attach/detach lifecycle across the main window and every Popout is shared
  * with the other scene watchers — see leaf-scanner.ts.
@@ -42,7 +41,7 @@ interface Transaction {
 	finalizing: boolean;
 	baselineIds: Set<string>;
 	mediaIds: Set<string>;
-	/** All expected elements exist; wait for the importer's following board save. */
+	/** All expected elements exist; wait for the host's remaining writes. */
 	readyToPack: boolean;
 	/**
 	 * Safety-net timer for import paths that never call `synchronizeWithData`
@@ -55,11 +54,9 @@ interface Transaction {
 }
 
 /**
- * Some modal insert paths save directly and never call `synchronizeWithData`,
- * leaving no completion event for packing. `view.save()` is not a substitute:
- * one import can save more than once while an embeddable measures itself. This
- * fallback bounds the wait; ordinary imports still finish through the observable
- * synchronize-with-data path.
+ * Some modal insert paths never call the observable view save/sync methods,
+ * leaving no completion event for packing. This is only a fallback for those
+ * paths; it never runs while a native save or sync is still active.
  */
 const FALLBACK_PACK_MS = 1000;
 
@@ -74,8 +71,12 @@ const TRANSACTION_IDLE_EXPIRY_MS = 5 * 60_000;
 interface PackState {
 	detachDocument: () => void;
 	detachBoardSync: () => void;
+	detachBoardSave: () => void;
 	known: Set<string>;
 	transactions: Transaction[];
+	pendingSaves: number;
+	pendingSyncs: number;
+	idleResolvers: Array<() => void>;
 	lastDropSignature: string | null;
 	lastDropWasTrusted: boolean;
 }
@@ -159,6 +160,16 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 		if (debugEvents.length > 100) debugEvents.shift();
 	};
 
+	const notifyNativeIdle = (state: PackState) => {
+		if (state.pendingSaves || state.pendingSyncs) return;
+		for (const resolve of state.idleResolvers.splice(0)) resolve();
+	};
+
+	const awaitNativeIdle = (state: PackState): Promise<void> => {
+		if (!state.pendingSaves && !state.pendingSyncs) return Promise.resolve();
+		return new Promise((resolve) => state.idleResolvers.push(resolve));
+	};
+
 	const clearTransactionTimers = (transaction: Transaction) => {
 		if (transaction.fallbackTimer != null) window.clearTimeout(transaction.fallbackTimer);
 		if (transaction.expiryTimer != null) window.clearTimeout(transaction.expiryTimer);
@@ -181,7 +192,7 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 		}, TRANSACTION_IDLE_EXPIRY_MS);
 	};
 
-	/** Finish a completed import after Excalidraw's own scene synchronization. */
+	/** Finish a completed import after the host's native writes drain. */
 	const packTransaction = async (leaf: WorkspaceLeaf, state: PackState, transaction: Transaction, source: string) => {
 		if (!state.transactions.includes(transaction) || transaction.finalizing) return;
 		transaction.finalizing = true;
@@ -204,8 +215,21 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 					debug("animated-image-converted", { from: id, to: replacementId, path: file.path });
 				}
 			}
+			// Conversion calls the host's addElementsToView/save pipeline again.
+			// The import may have been idle when this transaction started, but these
+			// new writes and their synchronization must finish before packing.
+			await awaitNativeIdle(state);
 			if (!state.transactions.includes(transaction)) return;
 			const packed = optimalPackElementsById(leaf, transaction.mediaIds);
+			if (packed) {
+				// A canvas mutation is not itself a completed Board save. Persist the
+				// packed positions through the host's save queue before finalizing.
+				const view = leaf.view as unknown as {
+					save?: (suppressReloadFromOwnWrite?: boolean, forcePersistence?: boolean) => Promise<void>;
+				};
+				if (typeof view.save !== "function") throw new Error("Board save is unavailable after packing");
+				await view.save(true, true);
+			}
 			debug("packed", { source, ids: Array.from(transaction.mediaIds), packed });
 		} catch (error) {
 			console.error("[Excalidraw PureRef] failed to finish a media import.", error);
@@ -215,12 +239,23 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 		}
 	};
 
+	/** A completed import is safe to pack once the host's active writes have drained. */
+	const finishReadyTransactions = (leaf: WorkspaceLeaf, state: PackState, source: string) => {
+		if (state.pendingSaves || state.pendingSyncs) return;
+		for (const transaction of [...state.transactions]) {
+			if (transaction.readyToPack) void packTransaction(leaf, state, transaction, source);
+		}
+	};
+
 	/** (Re)schedules a transaction's fallback pack after `delayMs`, replacing any pending one. */
 	const scheduleFallback = (leaf: WorkspaceLeaf, state: PackState, transaction: Transaction, delayMs: number) => {
 		if (transaction.fallbackTimer != null) window.clearTimeout(transaction.fallbackTimer);
 		transaction.fallbackTimer = window.setTimeout(() => {
 			transaction.fallbackTimer = null;
-			packTransaction(leaf, state, transaction, "fallback-timer");
+			// A native save or synchronization is observable and still in progress;
+			// its completion will run finishReadyTransactions instead.
+			if (state.pendingSaves || state.pendingSyncs) return;
+			void packTransaction(leaf, state, transaction, "fallback-timer");
 		}, delayMs);
 	};
 
@@ -326,44 +361,51 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 		debug("begin", { trusted, files: files.map((file) => file.name) });
 	};
 
-	/**
-	 * Obsidian Excalidraw imports each file, saves the Board, then asynchronously
-	 * runs synchronizeWithData() to apply that saved snapshot. Packing on the
-	 * vault "modify" event races that final sync and is overwritten. The promise
-	 * resolving is the authoritative, timer-free "import scene is settled" signal.
-	 */
-	const attachAfterBoardSync = (
+	/** Observe both native queues without changing their return values or errors. */
+	const trackNativeOperation = (
 		leaf: WorkspaceLeaf,
 		state: PackState,
 		scanner: LeafScannerHandle<PackState>,
+		method: "save" | "synchronizeWithData",
+		counter: "pendingSaves" | "pendingSyncs",
+		source: "board-save" | "board-sync",
 	): (() => void) => {
-		const view = leaf.view as unknown as {
-			synchronizeWithData?: (this: unknown, ...args: unknown[]) => Promise<unknown>;
-		};
-		const original = view.synchronizeWithData;
+		type AsyncMethod = (this: unknown, ...args: unknown[]) => Promise<unknown>;
+		const view = leaf.view as unknown as Record<string, AsyncMethod | undefined>;
+		const original = view[method];
 		if (typeof original !== "function") return () => {};
 		const wrapped = function (this: unknown, ...args: unknown[]) {
-			const result = original.call(this, ...args);
-			void Promise.resolve(result).then(() => {
+			state[counter]++;
+			let result: Promise<unknown>;
+			try {
+				result = original.call(this, ...args);
+			} catch (error) {
+				state[counter]--;
+				notifyNativeIdle(state);
+				throw error;
+			}
+			const settled = () => {
+				state[counter]--;
+				notifyNativeIdle(state);
 				if (scanner.isDisposed()) return;
 				const stillOwned = scanner.entries().some(([ownedLeaf, ownedState]) => ownedLeaf === leaf && ownedState === state);
 				if (!stillOwned) return;
-				debug("board-sync-resolved", {
+				debug(`${source}-resolved`, {
+					pendingSaves: state.pendingSaves,
+					pendingSyncs: state.pendingSyncs,
 					transactions: state.transactions.map((t) => ({
 						readyToPack: t.readyToPack,
 						pending: t.candidates.filter((c) => !c.matchedId).map((c) => c.name),
 					})),
 				});
-				for (const transaction of [...state.transactions]) {
-					if (!transaction.readyToPack) continue;
-					packTransaction(leaf, state, transaction, "board-sync");
-				}
-			});
+				finishReadyTransactions(leaf, state, source);
+			};
+			void Promise.resolve(result).then(settled, settled);
 			return result;
 		};
-		view.synchronizeWithData = wrapped;
+		view[method] = wrapped;
 		return () => {
-			if (view.synchronizeWithData === wrapped) view.synchronizeWithData = original;
+			if (view[method] === wrapped) view[method] = original;
 		};
 	};
 
@@ -399,13 +441,18 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 		const state: PackState = {
 			detachDocument: () => {},
 			detachBoardSync: () => {},
+			detachBoardSave: () => {},
 			known,
 			transactions: [],
+			pendingSaves: 0,
+			pendingSyncs: 0,
+			idleResolvers: [],
 			lastDropSignature: null,
 			lastDropWasTrusted: false,
 		};
 		state.detachDocument = attachDocument(leaf, state);
-		state.detachBoardSync = attachAfterBoardSync(leaf, state, scanner);
+		state.detachBoardSync = trackNativeOperation(leaf, state, scanner, "synchronizeWithData", "pendingSyncs", "board-sync");
+		state.detachBoardSave = trackNativeOperation(leaf, state, scanner, "save", "pendingSaves", "board-save");
 		return state;
 	};
 
@@ -422,8 +469,10 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 			});
 		}
 		state.transactions = [];
+		for (const resolve of state.idleResolvers.splice(0)) resolve();
 		state.detachDocument();
 		state.detachBoardSync();
+		state.detachBoardSave();
 	};
 
 	return attachPerLeafScanner<PackState>(plugin, {

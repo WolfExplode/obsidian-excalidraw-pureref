@@ -113,10 +113,12 @@ setting globally, the normal Board view is affected for that interval too.
   [Excalidraw embeddable z-order limitation](../integrations/excalidraw-embeddable-z-order-limitation.md).
 - A multi-file media import is automatically arranged as a compact PureRef-style
   block. Only media created by that import moves; existing Board content stays
-  in place. Packing occurs after Obsidian Excalidraw's native
-  `synchronizeWithData()` import-sync promise resolves, rather than on a delay
-  or on the earlier vault-save event; this prevents the importer from restoring
-  its pre-pack scene snapshot over videos and other embeddables.
+  in place. Packing waits for the host plugin's outstanding Board saves and
+  synchronizations, including those triggered by animated-image conversion,
+  then saves the packed Board. One early synchronization is not enough: later
+  import writes can restore the original placement. Animated-image conversion
+  saves a deletion marker for each source image so those later writes cannot
+  bring back the original beside its packed embeddable.
 
 These integrations are designed to be additive where possible. The explicit
 gesture and shortcut overrides above are the intentional exceptions.
