@@ -35,6 +35,9 @@ experiments and superseded hypotheses.
 The import decision and current limitations are in
 [ADR 0011](adr/0011-import-pureref-2x-into-current-board.md) and
 [ADR 0012](adr/0012-import-pureref-1x-into-current-board.md).
+Image export scope and the legacy writer are in
+[ADR 0013](adr/0013-export-board-images-to-pureref-1x.md).
+The 2.x export contract is in [ADR 0014](adr/0014-export-board-to-pureref-2x.md).
 
 ## Common change routing
 

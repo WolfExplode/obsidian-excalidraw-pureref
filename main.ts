@@ -5,6 +5,7 @@ import { ExcalidrawPureRefSettingTab } from "src/settings-tab";
 import { getActiveExcalidrawFile, getActiveExcalidrawLeaf } from "src/excalidraw-view";
 import { exportSelectedMedia } from "src/media-export";
 import { importPureRefFile, promptPureRefDrop } from "src/pur2-import";
+import { exportBoardToPureRef } from "src/pur1-export";
 import { attachBoardGestures } from "src/board-gestures";
 import { attachPopoutDropBridge } from "src/popout-drop-bridge";
 import { attachInsertModalAutoConfirm } from "src/insert-modal-autoconfirm";
@@ -195,6 +196,30 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 				if (!getActiveExcalidrawFile(this.app) || !leaf) return false;
 				if (checking) return true;
 				void importPureRefFile(this, leaf, leaf.view.containerEl.ownerDocument.defaultView ?? window);
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "export-board-images-to-pureref",
+			name: "Export Board images and text to PureRef file (1.x)",
+			checkCallback: (checking) => {
+				const leaf = this.app.workspace.getMostRecentLeaf();
+				if (!getActiveExcalidrawFile(this.app) || !leaf) return false;
+				if (checking) return true;
+				void exportBoardToPureRef(leaf, "1.x");
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "export-board-to-pureref-2x",
+			name: "Export Board images and text to PureRef file (2.x)",
+			checkCallback: (checking) => {
+				const leaf = this.app.workspace.getMostRecentLeaf();
+				if (!getActiveExcalidrawFile(this.app) || !leaf) return false;
+				if (checking) return true;
+				void exportBoardToPureRef(leaf, "2.x");
 				return true;
 			},
 		});

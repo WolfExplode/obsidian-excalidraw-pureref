@@ -122,6 +122,8 @@ with the edited database length, rotate the database into `[T:D)` followed by
 file offset 104 to EOF. If the thumbnail BLOB itself has not been regenerated,
 it can still preview the previous scene until PureRef saves again.
 `scripts/pur2_repack.py` implements this operation.
+The host plugin's `src/pur2-writer.ts` creates the database and container from
+Board images and notes without requiring an existing `.pur` file.
 
 This was tested by changing an image's X translation from `0` to `222` in a
 2.0.3 database, repacking it, and loading and resaving the result through

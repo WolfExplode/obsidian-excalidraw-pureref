@@ -48,7 +48,9 @@ await esbuild.build({
 	// CommonJS and the ESM output would be a syntax error. Force .mjs.
 	outExtension: { ".js": ".mjs" },
 	// node:test and node:assert stay external so the runner's own instance is used.
-	external: ["node:*"],
+	// sql.js is a CommonJS/UMD package that dynamically loads node:fs. Keep it
+	// external so this ESM test bundle imports it through Node's CJS bridge.
+	external: ["node:*", "sql.js/dist/sql-asm-memory-growth.js"],
 	logLevel: "warning",
 });
 

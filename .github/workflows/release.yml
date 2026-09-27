@@ -23,8 +23,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build plugin
-        run: npm run build
+      - name: Verify plugin
+        run: npm run verify
+
+      - name: Verify version matches tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          LOCK_VERSION=$(node -p "require('./package-lock.json').version")
+          if [ "$TAG" != "$MANIFEST_VERSION" ] || [ "$TAG" != "$PACKAGE_VERSION" ] || [ "$TAG" != "$LOCK_VERSION" ]; then
+            echo "Tag ($TAG), manifest ($MANIFEST_VERSION), package ($PACKAGE_VERSION), and lockfile ($LOCK_VERSION) must match"
+            exit 1
+          fi
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
@@ -32,15 +43,8 @@ jobs:
           subject-path: |
             main.js
             styles.css
-
-      - name: Verify manifest version matches tag
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
-          if [ "$TAG" != "$MANIFEST_VERSION" ]; then
-            echo "Tag ($TAG) does not match manifest.json version ($MANIFEST_VERSION)"
-            exit 1
-          fi
+            transparent-proto.cjs
+            transparent-proto.html
 
       - name: Create release
         env:
@@ -50,4 +54,5 @@ jobs:
           gh release create "$TAG" \
             --title "$TAG" \
             --draft \
-            main.js manifest.json styles.css
+            --generate-notes \
+            main.js manifest.json styles.css transparent-proto.cjs transparent-proto.html

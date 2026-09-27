@@ -49,6 +49,10 @@ interface ElectronDialog {
 		win: ElectronBrowserWindow | null,
 		options: { title?: string; properties?: string[]; filters?: Array<{ name: string; extensions: string[] }> },
 	): Promise<ElectronOpenDialogResult>;
+	showSaveDialog(
+		win: ElectronBrowserWindow | null,
+		options: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> },
+	): Promise<{ canceled: boolean; filePath?: string }>;
 }
 
 interface ElectronRemoteModule {
@@ -225,6 +229,18 @@ export async function pickPureRefFileForDomWindow(target: Window | null): Promis
 		filters: [{ name: "PureRef scene", extensions: ["pur"] }],
 	});
 	return result.canceled ? null : result.filePaths[0] ?? null;
+}
+
+/** Choose a destination for an exported PureRef interchange file. */
+export async function pickPureRefExportPath(target: Window | null, defaultPath: string): Promise<string | null> {
+	const remoteModule = resolveRemoteModuleForDomWindow(target);
+	if (!remoteModule?.dialog?.showSaveDialog) throw new Error("The native save dialog is unavailable");
+	const result = await remoteModule.dialog.showSaveDialog(remoteModule.getCurrentWindow?.() ?? null, {
+		title: "Export Board images to PureRef",
+		defaultPath,
+		filters: [{ name: "PureRef file", extensions: ["pur"] }],
+	});
+	return result.canceled ? null : result.filePath ?? null;
 }
 
 export function adjustWindowOpacityById(id: number, delta: number): number | null {

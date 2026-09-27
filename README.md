@@ -49,6 +49,10 @@ https://github.com/user-attachments/assets/fda37d9a-c42b-4f69-adbe-68710d3f4a9d
     go to the location configured in Obsidian's attachment settings.
   - Drop a `.pur` file onto a Board to choose between importing its media and
     linking the file as usual.
+  - Run **Export Board images and text to PureRef file (1.x)** or **(2.x)** to
+    write the current Board to a `.pur` file. Only images, GIFs, and standalone
+    text are included. The 1.x export bakes image transforms into PNGs; the
+    2.x export preserves original PNG, JPEG, and GIF bytes and their placement.
   - **Ctrl+Shift+E** exports every selected image/video/embed to a folder,
     rendering cropped images to a fresh PNG of just the visible crop.
 
@@ -68,7 +72,7 @@ https://github.com/user-attachments/assets/6fabca8b-9dae-4148-8c86-74e51e6ee2b9
 
 ## Requirements
 
-- Obsidian Desktop v1.13.4 or newer (I have not tested older versions of obsidian)
+- Obsidian Desktop v1.13.0 or newer (tested with v1.13.4; older supported versions have not been tested)
 - The [Obsidian Excalidraw community plugin](https://github.com/zsviczian/obsidian-excalidraw-plugin).
 - I have not tested mac or linux systems so consider this plugin windows only. 
 
@@ -93,7 +97,8 @@ As the plugin is now, it's fully functional as a reference board, but still lack
 
 PureRef 1.10/1.11 and 2.0/2.1 image placements and notes can be imported from `.pur` files.
 Pen strokes, editable group structure, and rich note styling are not imported.
-PureRef `.pur` export is not yet implemented.
+Board images and standalone text can be exported to PureRef 1.10 or 2.x `.pur`
+files. Other elements, including drawings, videos, and embeds, are skipped.
 
 ### Limitations
 

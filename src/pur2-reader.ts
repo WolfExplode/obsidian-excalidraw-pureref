@@ -68,7 +68,16 @@ function bytes(value: SqlValue, name: string): Uint8Array {
 function qtBytes(value: SqlValue, name: string): Uint8Array {
 	// sql.js truncates TEXT at embedded NUL. CAST(column AS BLOB) in the query
 	// preserves its UTF-8 bytes; decode that wrapper before reversing it.
-	if (value instanceof Uint8Array) value = new TextDecoder("utf-8", { fatal: true }).decode(value);
+	// Exported files store these fields as actual BLOBs; older PureRef files
+	// store the same Qt bytes through a Latin-1-to-UTF-8 TEXT wrapper.
+	if (value instanceof Uint8Array) {
+		if (value.length === 77 && value[0] === 0 && value[3] === 0x50) return value;
+		if (name === "image bounds" && value.length >= 26 && value[0] === 0 && value[2] === 4) {
+			const countAt = 9 + value[8];
+			if (countAt + 4 <= value.length && value.length === countAt + 4 + new DataView(value.buffer, value.byteOffset).getUint32(countAt, false) * 20 + 8) return value;
+		}
+		value = new TextDecoder("utf-8", { fatal: true }).decode(value);
+	}
 	if (typeof value !== "string") throw new Error(`Invalid ${name} in PureRef database`);
 	const result = new Uint8Array(value.length);
 	for (let i = 0; i < value.length; i++) {
