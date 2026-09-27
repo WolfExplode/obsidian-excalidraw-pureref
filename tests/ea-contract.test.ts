@@ -65,12 +65,14 @@ function classDeclaresMember(name: string): boolean {
  */
 const USED_EA_METHODS = [
 	{ name: "getAPI", usedIn: "board-render.ts" },
-	{ name: "addElementsToView", usedIn: "media-auto-pack.ts (doc reference — behavioral reasoning, not a call site)" },
+	{ name: "addElementsToView", usedIn: "multi-animated-drop.ts" },
 	{ name: "getBoundingBox", usedIn: "board-render.ts" },
 	{ name: "reset", usedIn: "board-render.ts" },
 	{ name: "getExportSettings", usedIn: "board-render.ts" },
 	{ name: "createSVG", usedIn: "board-render.ts" },
 	{ name: "copyViewElementsToEAforEditing", usedIn: "board-render.ts" },
+	{ name: "addEmbeddable", usedIn: "multi-animated-drop.ts" },
+	{ name: "deleteViewElements", usedIn: "multi-animated-drop.ts" },
 ];
 
 describe("ExcalidrawAutomate contract (vs. vendored upstream source)", () => {

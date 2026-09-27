@@ -44,6 +44,9 @@ https://github.com/user-attachments/assets/fda37d9a-c42b-4f69-adbe-68710d3f4a9d
 <img width="800" height="453" alt="Image Manipulation" src="https://github.com/user-attachments/assets/336990ed-c6e8-4e14-bbe2-c9ae7ebd5588" />
 
 ### **Media import/export**
+  - Multi-file external drops turn imported GIF, WebP, and APNG images into
+    playing embeddables. Single-file drops retain Excalidraw's image/embeddable
+    choice.
   - Open a Board and run **Import PureRef file into current Board** from
     the Obsidian command palette to choose a `.pur` file. Image attachments
     go to the location configured in Obsidian's attachment settings.

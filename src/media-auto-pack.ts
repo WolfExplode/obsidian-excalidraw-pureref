@@ -5,6 +5,7 @@ import { getSceneElementFile, isExcalidrawLeaf, optimalPackElementsById, readSce
 import { desanitizeAttachmentName } from "./popout-drop-bridge";
 import { attachPerLeafScanner, onEvent, type LeafScannerApi, type LeafScannerHandle } from "./leaf-scanner";
 import { importFileMatchesVaultPath } from "./import-file-match";
+import { convertMultiDropAnimatedImage } from "./multi-animated-drop";
 
 /**
  * Packs imported media only after every file in an observed import transaction
@@ -36,6 +37,9 @@ interface Candidate {
 
 interface Transaction {
 	candidates: Candidate[];
+	/** Upstream only offers the animated-image choice for one external file. */
+	convertAnimated: boolean;
+	finalizing: boolean;
 	baselineIds: Set<string>;
 	mediaIds: Set<string>;
 	/** All expected elements exist; wait for the importer's following board save. */
@@ -113,7 +117,7 @@ function scenePath(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf, el: Med
 	return boardPath ? plugin.app.metadataCache.getFirstLinkpathDest(path, boardPath)?.path ?? null : null;
 }
 
-function seedTransaction(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf, files: Array<{ name: string; size: number }>, known: Set<string>): Transaction {
+function seedTransaction(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf, files: Array<{ name: string; size: number }>, known: Set<string>, convertAnimated: boolean): Transaction {
 	const boardPath = (leaf.view as unknown as { file?: { path?: string } }).file?.path;
 	const candidates = files.map((file) => {
 		const paths = new Set<string>();
@@ -125,6 +129,8 @@ function seedTransaction(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf, f
 	});
 	return {
 		candidates,
+		convertAnimated,
+		finalizing: false,
 		baselineIds: new Set(known),
 		mediaIds: new Set(),
 		readyToPack: false,
@@ -175,13 +181,38 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 		}, TRANSACTION_IDLE_EXPIRY_MS);
 	};
 
-	/** Packs one transaction and removes it from state, wherever the trigger came from. */
-	const packTransaction = (leaf: WorkspaceLeaf, state: PackState, transaction: Transaction, source: string) => {
-		if (!state.transactions.includes(transaction)) return;
+	/** Finish a completed import after Excalidraw's own scene synchronization. */
+	const packTransaction = async (leaf: WorkspaceLeaf, state: PackState, transaction: Transaction, source: string) => {
+		if (!state.transactions.includes(transaction) || transaction.finalizing) return;
+		transaction.finalizing = true;
 		clearTransactionTimers(transaction);
-		const packed = optimalPackElementsById(leaf, transaction.mediaIds);
-		debug("packed", { source, ids: Array.from(transaction.mediaIds), packed });
-		state.transactions = state.transactions.filter((item) => item !== transaction);
+		try {
+			if (transaction.convertAnimated) {
+				for (const candidate of transaction.candidates) {
+					const id = candidate.matchedId;
+					if (!id || !state.transactions.includes(transaction)) continue;
+					const image = (readSceneElements(leaf) ?? []).find((raw) => (raw as MediaElement).id === id) as MediaElement | undefined;
+					if (image?.type !== "image" || !image.fileId) continue;
+					const file = getSceneElementFile(leaf, image.fileId);
+					if (!file || !importFileMatchesVaultPath(candidate.name, file.path)) continue;
+					const replacementId = await convertMultiDropAnimatedImage(plugin, leaf, id, image.fileId, file);
+					if (!replacementId) continue;
+					candidate.matchedId = replacementId;
+					transaction.mediaIds.delete(id);
+					transaction.mediaIds.add(replacementId);
+					state.known.add(replacementId);
+					debug("animated-image-converted", { from: id, to: replacementId, path: file.path });
+				}
+			}
+			if (!state.transactions.includes(transaction)) return;
+			const packed = optimalPackElementsById(leaf, transaction.mediaIds);
+			debug("packed", { source, ids: Array.from(transaction.mediaIds), packed });
+		} catch (error) {
+			console.error("[Excalidraw PureRef] failed to finish a media import.", error);
+		} finally {
+			clearTransactionTimers(transaction);
+			state.transactions = state.transactions.filter((item) => item !== transaction);
+		}
 	};
 
 	/** (Re)schedules a transaction's fallback pack after `delayMs`, replacing any pending one. */
@@ -277,7 +308,7 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 		}
 	};
 
-	const begin = (leaf: WorkspaceLeaf, state: PackState, files: Array<{ name: string; size: number }>, trusted: boolean) => {
+	const begin = (leaf: WorkspaceLeaf, state: PackState, files: Array<{ name: string; size: number }>, trusted: boolean, convertAnimated: boolean) => {
 		if (files.length === 0) return;
 		const signature = candidateSignature(files);
 		// The filename-sanitizing bridge re-dispatches the same drop as a synthetic
@@ -289,7 +320,7 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 		}
 		state.lastDropSignature = signature;
 		state.lastDropWasTrusted = trusted;
-		const transaction = seedTransaction(plugin, leaf, files, state.known);
+		const transaction = seedTransaction(plugin, leaf, files, state.known, convertAnimated);
 		state.transactions.push(transaction);
 		scheduleExpiry(state, transaction);
 		debug("begin", { trusted, files: files.map((file) => file.name) });
@@ -342,11 +373,13 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 		const onDrop = (event: DragEvent) => {
 			if (!event.dataTransfer) return;
 			if (getLeafForNode(plugin, event.target as Node | null, doc) !== leaf) return;
-			begin(leaf, state, fileCandidates(event.dataTransfer), event.isTrusted);
+			const files = fileCandidates(event.dataTransfer);
+			const draggable = (plugin.app as unknown as { dragManager?: { draggable?: unknown } }).dragManager?.draggable;
+			begin(leaf, state, files, event.isTrusted, files.length > 1 && !draggable);
 		};
 		const onPaste = (event: ClipboardEvent) => {
 			if (getLeafForNode(plugin, event.target as Node | null, doc) !== leaf || !event.clipboardData) return;
-			begin(leaf, state, fileCandidates(event.clipboardData), event.isTrusted);
+			begin(leaf, state, fileCandidates(event.clipboardData), event.isTrusted, false);
 		};
 		doc.addEventListener("drop", onDrop, true);
 		doc.addEventListener("paste", onPaste, true);
