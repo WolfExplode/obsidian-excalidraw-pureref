@@ -13,7 +13,8 @@ describe("PureRef 2.x writer", () => {
 			{ kind: "image", data: png, format: "png", sourceWidth: 1, sourceHeight: 1,
 				crop: { x: 0, y: 0, width: 1, height: 1 }, x: 10, y: 20, width: 30, height: 40,
 				angle: 0, flipX: false, flipY: false, opacity: 1 },
-			{ kind: "text", text: "hello <world>", x: 50, y: 60, opacity: 0.8 },
+			{ kind: "text", text: "hello <world>", x: 50, y: 60, width: 100, height: 25,
+				fontSize: 20, opacity: 0.8 },
 		], Uint8Array.of(0xff, 0xd8, 0xff, 0xd9));
 		assert.equal(databaseFromPur(output).subarray(0, 16).toString(), new TextEncoder().encode("SQLite format 3\0").toString());
 		const scene = await readPureRefScene(output);
@@ -21,6 +22,11 @@ describe("PureRef 2.x writer", () => {
 		assert.equal(Buffer.from(scene.images[0].data).equals(png), true);
 		assert.equal(scene.notes.length, 1);
 		assert.match(scene.notes[0].html, /hello &lt;world&gt;/);
+		assert.match(scene.notes[0].html, /<span style="font-size:12px;">hello &lt;world&gt;<\/span>/);
+		const noteItem = scene.items.find((entry) => entry.id === scene.notes[0].id)!;
+		assert.equal(noteItem.transform[0], 40 / 12);
+		assert.equal(noteItem.transform[4], 40 / 12);
+		assert.deepEqual(transformPoint(noteItem.transform, { x: 0, y: 0 }), { x: 300, y: 265 });
 		const placement = scene.imageItems[0];
 		const item = scene.items.find((entry) => entry.id === placement.id)!;
 		const origin = transformPoint(item.transform, transformPoint(placement.imageTransform, { x: 0, y: 0 }));

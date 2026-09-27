@@ -4,8 +4,9 @@ status: accepted
 
 # Export Board images as PureRef 1.x interchange
 
-The host plugin exports every live image placement and standalone text on the current Board to a
-user-chosen `.pur` file. It writes PureRef's documented 1.10 flat format, which
+The host plugin offers a choice of the selected elements or the entire current
+Board, then exports the live image placements and standalone text in that scope
+to a user-chosen `.pur` file. It writes PureRef's documented 1.10 flat format, which
 PureRef 1.11 also uses and PureRef 2.x can produce as a legacy file. The Board
 remains the editable source of truth.
 

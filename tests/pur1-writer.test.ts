@@ -36,10 +36,11 @@ describe("PureRef 1.x image writer", () => {
 
 	it("includes standalone text", () => {
 		const scene = readPureRef1Scene(writePureRef1Images([{ png, x: 0, y: 0, width: 4, height: 4, order: 2 }],
-			[{ text: "hello", x: 40, y: 60, order: 1 }]));
+			[{ text: "hello", x: 40, y: 60, fontSize: 20, order: 1 }]));
 		assert.equal(scene.notes.length, 1);
 		assert.equal(scene.notes[0].html, "hello");
 		assert.deepEqual(scene.items[1].transform.slice(6, 8), [40, 60]);
+		assert.equal(scene.items[1].transform[0], 80 / 22);
 		assert.deepEqual(scene.items.map((item) => item.z), [2, 1]);
 	});
 });

@@ -15,6 +15,7 @@ interface AutomateElement {
 
 interface ExcalidrawAutomateImport {
 	getAPI?(view: unknown): ExcalidrawAutomateImport;
+	style: { fontSize: number; fontFamily: number };
 	addImage(x: number, y: number, file: TFile, scale?: boolean, anchor?: boolean): Promise<string | null>;
 	addText(x: number, y: number, text: string): string;
 	getElement(id: string): AutomateElement;
@@ -147,6 +148,22 @@ function noteText(html: string): string {
 	return (parsed.body.textContent ?? "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function noteFontSize(html: string): number {
+	// A note's actual text may override the body default (usually 22 px).
+	// Legacy 1.x notes contain plain text and use that default.
+	const parsed = new DOMParser().parseFromString(html, "text/html");
+	const pixelSize = (value: string): number | null => {
+		const size = Number.parseFloat(value);
+		return Number.isFinite(size) && size > 0 && value.endsWith("px") ? size : null;
+	};
+	for (const element of Array.from(parsed.body.querySelectorAll<HTMLElement>("p, span, div, li"))) {
+		if (!element.textContent?.trim()) continue;
+		const size = pixelSize(element.style.fontSize);
+		if (size !== null) return size;
+	}
+	return pixelSize(parsed.body.style.fontSize) ?? 22;
+}
+
 function safeName(name: string): string {
 	return name.replace(/[<>:"/\\|?*\x00-\x1f\[\]#^]/g, "_").trim().slice(0, 90) || "PureRef import";
 }
@@ -190,6 +207,8 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 		throw new Error("The target Board closed while the PureRef file was loading");
 	}
 	const automate = getAutomate(plugin, leaf);
+	const originalFontSize = automate.style.fontSize;
+	const originalFontFamily = automate.style.fontFamily;
 	const originalFiles = new Map<number, TFile>();
 	const created: TFile[] = [];
 	let commitAttempted = false;
@@ -235,13 +254,34 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 				const text = noteText(entry.note.html);
 				if (!text) continue;
 				const position = chain(scene, item, { x: 0, y: 0 });
+				const unitDown = chain(scene, item, { x: 0, y: 1 });
+				const scale = Math.hypot(unitDown.x - position.x, unitDown.y - position.y);
+				const declaredSize = noteFontSize(entry.note.html);
+				// Qt records a 9 pt note as 12 CSS px. The item transform scales
+				// those pixels into PureRef scene coordinates, just as it does images.
+				const fontSize = declaredSize * scale * DEFAULT_IMAGE_SCALE;
+				if (!Number.isFinite(fontSize) || fontSize <= 0) throw new Error(`PureRef note ${item.id} has invalid text size`);
+				automate.style.fontSize = fontSize;
+				automate.style.fontFamily = 2; // Helvetica is Excalidraw's closest Open Sans match.
 				const id = automate.addText(
 					position.x * DEFAULT_IMAGE_SCALE, position.y * DEFAULT_IMAGE_SCALE, text);
+				automate.style.fontSize = originalFontSize;
+				automate.style.fontFamily = originalFontFamily;
 				const element = automate.getElement(id);
+				// PureRef's item transform is the note's visual center. Excalidraw
+				// stores a text element at the top-left of its measured box.
+				element.x -= element.width / 2;
+				element.y -= element.height / 2;
+				// Qt's rich-text document includes a half-em inset around its glyphs.
+				// Match that inset after Excalidraw measures the equivalent text box.
+				element.x -= fontSize / 2;
+				element.y += fontSize / 2;
 				element.opacity = appearance.opacity;
 				element.locked = appearance.locked;
 			}
 		}
+		automate.style.fontSize = originalFontSize;
+		automate.style.fontFamily = originalFontFamily;
 		if (getExcalidrawFileForLeaf(leaf)?.path !== boardFile.path || !getExcalidrawApi(leaf)) {
 			throw new Error("The target Board closed while the import was being prepared");
 		}
@@ -256,6 +296,9 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 			for (const file of created.reverse()) await plugin.app.vault.delete(file).catch(() => undefined);
 		}
 		throw error;
+	} finally {
+		automate.style.fontSize = originalFontSize;
+		automate.style.fontFamily = originalFontFamily;
 	}
 }
 

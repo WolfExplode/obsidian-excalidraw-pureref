@@ -21,8 +21,11 @@ export interface PureRef2Image {
 export interface PureRef2Text {
 	kind: "text";
 	text: string;
+	fontSize: number;
 	x: number;
 	y: number;
+	width: number;
+	height: number;
 	opacity: number;
 }
 
@@ -36,6 +39,7 @@ interface SqlDatabase {
 }
 
 let sqlPromise: Promise<{ Database: new () => SqlDatabase }> | null = null;
+const NOTE_FONT_SIZE_PX = 12;
 
 /** PureRef stores Qt streams as Latin-1 code points encoded in SQLite TEXT. */
 function qtTextBytes(raw: Uint8Array): Uint8Array {
@@ -84,7 +88,7 @@ function html(text: string): string {
 	const safe = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 	return `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">\n` +
 		`<html><head><meta name="qrichtext" content="1" /><meta charset="utf-8" /></head>` +
-		`<body style="font-family:'Open Sans'; font-size:22px;"><p>${safe.replace(/\n/g, "<br />")}</p></body></html>`;
+		`<body style="font-family:'Open Sans'; font-size:22px;"><p><span style="font-size:${NOTE_FONT_SIZE_PX}px;">${safe.replace(/\n/g, "<br />")}</span></p></body></html>`;
 }
 
 const SCHEMA = [
@@ -137,11 +141,18 @@ export async function writePureRef2Scene(items: readonly PureRef2Item[], thumbna
 				db.run("INSERT INTO items_images VALUES (?,?,?,?,CAST(? AS TEXT),CAST(? AS TEXT),?,?)", [id, 1, id,
 					item.format === "gif" ? 3 : 0, qtTextBytes(matrix(1, 0, 0, 1, tx, ty)), qtTextBytes(painterPath(crop.width, crop.height)), 0, 1]);
 			} else {
-				const x = item.x * 4, y = item.y * 4;
-				minX = Math.min(minX, x); minY = Math.min(minY, y);
-				maxX = Math.max(maxX, x + 1); maxY = Math.max(maxY, y + 1);
+				if (![item.fontSize, item.width, item.height].every(Number.isFinite)
+					|| item.fontSize <= 0 || item.width <= 0 || item.height <= 0) throw new Error("Invalid PureRef text size");
+				// Export text at half its Board size. PureRef positions a note around
+				// its transform origin, so center the smaller box at one quarter of
+				// the original width and height from Excalidraw's top-left.
+				const x = (item.x + item.width / 4) * 4, y = (item.y + item.height / 4) * 4;
+				const textScale = item.fontSize * 2 / NOTE_FONT_SIZE_PX;
+				minX = Math.min(minX, item.x * 4); minY = Math.min(minY, item.y * 4);
+				maxX = Math.max(maxX, (item.x + item.width / 2) * 4);
+				maxY = Math.max(maxY, (item.y + item.height / 2) * 4);
 				db.run("INSERT INTO items VALUES (?,?,?,CAST(? AS TEXT),CAST(? AS TEXT),?,?,?,?)", [-1, id, null,
-					qtTextBytes(matrix(1, 0, 0, 1, x, y)), qtTextBytes(sortOrder(id + 1)), id + 1,
+					qtTextBytes(matrix(textScale, 0, 0, textScale, x, y)), qtTextBytes(sortOrder(id + 1)), id + 1,
 					Math.max(0, Math.min(1, item.opacity)), 0, null]);
 				db.run("INSERT INTO items_notes VALUES (?,?,CAST(? AS TEXT),?,?,?)", [null, id,
 					qtTextBytes(doubles(0x16, [-1, -1])), "#d9ffffff", html(item.text), 1]);

@@ -23,8 +23,16 @@ to placement geometry, and items are added in Z order.
 
 PureRef placement coordinates and image dimensions map to 25% of their source
 values on the Board, matching Alt+S's default image scale. PureRef's image
-resizing and relative layout are retained. Notes use Excalidraw's default font
-size, while their positions follow the same coordinate conversion.
+resizing and relative layout are retained. Notes take their font size from the
+PureRef rich text (including inline overrides) and item transform, then use the
+same 25% coordinate conversion as images. A native 9 pt note, for example,
+stores a 12 px inline font size; multiplying that by the note transform gives
+its size relative to the images. Imported notes use Excalidraw's Helvetica
+family as the closest available match for PureRef's Open Sans.
+PureRef's note transform is its visual center; the importer subtracts half of
+the created Excalidraw text box so its top-left aligns with nearby media. It
+also accounts for PureRef's half-em rich-text document inset.
+Legacy plain-text notes use PureRef's 22 px default.
 
 PureRef 2.x pen strokes are outside this import. This version also does not
 recreate editable PureRef groups or note rich-text styling. Flattened animated

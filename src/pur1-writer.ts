@@ -14,6 +14,7 @@ export interface PureRefExportText {
 	text: string;
 	x: number;
 	y: number;
+	fontSize: number;
 	order?: number;
 }
 
@@ -129,12 +130,14 @@ export function writePureRef1Images(images: readonly PureRefExportImage[], notes
 	}
 	for (let index = 0; index < notes.length; index++) {
 		const note = notes[index];
-		if (!Number.isFinite(note.x) || !Number.isFinite(note.y)) throw new Error("Invalid PureRef text position");
+		if (![note.x, note.y, note.fontSize].every(Number.isFinite) || note.fontSize <= 0) throw new Error("Invalid PureRef text geometry");
 		const recordAt = writer.length;
 		writer.u64(0);
 		writer.u32(32); writer.utf16("GraphicsTextItem");
 		writer.string(note.text);
-		writer.matrix(1, 1);
+		// Legacy notes have an implicit 22 px Qt font. Scale their item matrix
+		// together with the 4x coordinate conversion used by Board images.
+		writer.matrix(note.fontSize * 4 / 22, note.fontSize * 4 / 22);
 		writer.f64(note.x); writer.f64(note.y); writer.f64(1);
 		writer.u32(images.length + index); writer.f64(note.order ?? images.length + index + 1);
 		writer.add(Uint8Array.of(1));

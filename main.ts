@@ -207,7 +207,7 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 				const leaf = this.app.workspace.getMostRecentLeaf();
 				if (!getActiveExcalidrawFile(this.app) || !leaf) return false;
 				if (checking) return true;
-				void exportBoardToPureRef(leaf, "1.x");
+				void exportBoardToPureRef(this.app, leaf, "1.x");
 				return true;
 			},
 		});
@@ -219,7 +219,7 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 				const leaf = this.app.workspace.getMostRecentLeaf();
 				if (!getActiveExcalidrawFile(this.app) || !leaf) return false;
 				if (checking) return true;
-				void exportBoardToPureRef(leaf, "2.x");
+				void exportBoardToPureRef(this.app, leaf, "2.x");
 				return true;
 			},
 		});

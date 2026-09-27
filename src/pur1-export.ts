@@ -1,4 +1,4 @@
-import { Notice, type WorkspaceLeaf } from "obsidian";
+import { Modal, Notice, Setting, type App, type WorkspaceLeaf } from "obsidian";
 import { pickPureRefExportPath } from "./electron";
 import { getExcalidrawApi, getExcalidrawData, getExcalidrawFileForLeaf, getExcalidrawView, type SceneElement } from "./excalidraw-view";
 import { writePureRef1Images, type PureRefExportImage, type PureRefExportText } from "./pur1-writer";
@@ -8,6 +8,7 @@ interface ExportImageElement extends SceneElement {
 	fileId?: string;
 	crop?: { x: number; y: number; width: number; height: number } | null;
 	text?: string;
+	fontSize?: number;
 }
 
 function loadImage(owner: Window, source: string): Promise<HTMLImageElement> {
@@ -66,16 +67,56 @@ function thumbnail(owner: Window): Uint8Array {
 	return new Uint8Array(Buffer.from(jpeg.slice(jpeg.indexOf(",") + 1), "base64"));
 }
 
-/** Export supported images and standalone text from the current Board. */
-export async function exportBoardToPureRef(leaf: WorkspaceLeaf, version: "1.x" | "2.x"): Promise<void> {
+type ExportScope = "selected" | "board";
+
+function chooseExportScope(app: App, version: "1.x" | "2.x", hasSelection: boolean): Promise<ExportScope | null> {
+	return new Promise((resolve) => {
+		class ExportScopeModal extends Modal {
+			private choice: ExportScope | null = null;
+
+			onOpen(): void {
+				this.setTitle(`Export to PureRef (${version})`);
+				this.contentEl.createEl("p", { text: "Choose which Board elements to export." });
+				new Setting(this.contentEl)
+					.addButton((button) => button.setButtonText("Selected elements").setDisabled(!hasSelection).onClick(() => {
+						this.choice = "selected";
+						this.close();
+					}))
+					.addButton((button) => button.setButtonText("Entire Board").onClick(() => {
+						this.choice = "board";
+						this.close();
+					}));
+			}
+
+			onClose(): void {
+				resolve(this.choice);
+			}
+		}
+
+		new ExportScopeModal(app).open();
+	});
+}
+
+/** Export supported images and standalone text from the chosen Board scope. */
+export async function exportBoardToPureRef(app: App, leaf: WorkspaceLeaf, version: "1.x" | "2.x"): Promise<void> {
 	try {
 		const board = getExcalidrawFileForLeaf(leaf);
 		const api = getExcalidrawApi(leaf);
 		const data = getExcalidrawData(leaf);
 		if (!board || !api?.getSceneElements || !api.getFiles || !data) throw new Error("Open a loaded Excalidraw Board first");
-		const elements = api.getSceneElements().filter((el): el is ExportImageElement =>
-			!el.isDeleted && (el.type === "image" || el.type === "text" && !el.containerId)).slice();
-		if (elements.length === 0) { new Notice("This Board has no images or text to export."); return; }
+		const selectedIds = { ...api.getAppState().selectedElementIds };
+		const sceneElements = api.getSceneElements().slice();
+		const scope = await chooseExportScope(app, version, Object.values(selectedIds).some(Boolean));
+		if (!scope) return;
+		if (getExcalidrawFileForLeaf(leaf)?.path !== board.path) throw new Error("The Board changed during export");
+		const elements = sceneElements.filter((el): el is ExportImageElement =>
+			!el.isDeleted && (scope === "board" || !!selectedIds[el.id])
+				&& (el.type === "image" || el.type === "text" && !el.containerId));
+		if (elements.length === 0) {
+			new Notice(scope === "selected" ? "The selection has no images or standalone text to export."
+				: "This Board has no images or text to export.");
+			return;
+		}
 		const owner = getExcalidrawView(leaf)?.containerEl?.ownerDocument?.defaultView ?? window;
 		const destination = await pickPureRefExportPath(owner, `${board.basename}.pur`);
 		if (!destination) return;
@@ -87,9 +128,13 @@ export async function exportBoardToPureRef(leaf: WorkspaceLeaf, version: "1.x" |
 		for (const [index, element] of elements.entries()) {
 			if (element.type === "text") {
 				if (!element.text?.trim()) { skipped++; continue; }
-				notes.push({ text: element.text, x: element.x * 4, y: element.y * 4, order: index + 1 });
-				items2.push({ kind: "text", text: element.text, x: element.x, y: element.y,
-					opacity: (element.opacity ?? 100) / 100 });
+				const fontSize = element.fontSize ?? 20;
+				if (!Number.isFinite(fontSize) || fontSize <= 0) { skipped++; continue; }
+				const x = element.x + fontSize / 16, y = element.y + fontSize / 4;
+				notes.push({ text: element.text, x: (x + element.width / 4) * 4,
+					y: (y + element.height / 4) * 4, fontSize: fontSize / 2, order: index + 1 });
+				items2.push({ kind: "text", text: element.text, x, y,
+					width: element.width, height: element.height, fontSize, opacity: (element.opacity ?? 100) / 100 });
 				continue;
 			}
 			if (!element.fileId) { skipped++; continue; }
@@ -117,7 +162,7 @@ export async function exportBoardToPureRef(leaf: WorkspaceLeaf, version: "1.x" |
 				opacity: (element.opacity ?? 100) / 100 });
 		}
 		if (images.length + notes.length === 0 && items2.length === 0) {
-			new Notice("This Board has no supported images or standalone text to export."); return;
+			new Notice(`${scope === "selected" ? "The selection" : "This Board"} has no supported images or standalone text to export.`); return;
 		}
 		if (getExcalidrawFileForLeaf(leaf)?.path !== board.path) throw new Error("The Board changed during export");
 		const bytes = version === "1.x" ? writePureRef1Images(images, notes) : await writePureRef2Scene(items2, thumbnail(owner));
