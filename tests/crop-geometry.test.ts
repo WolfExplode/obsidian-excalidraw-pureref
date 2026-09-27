@@ -12,6 +12,7 @@ import {
 	pointInsideConvexPolygon,
 	polygonBounds,
 	rotateVector,
+	sceneRectMayCropRotatedImage,
 	viewportCropToCurrentLocal,
 	type AffineTransform,
 	type CropImageElement,
@@ -108,6 +109,22 @@ describe("elementLocalToScene", () => {
 		assertClose(bounds.y, rect.y, "y:", 1e-6);
 		assertClose(bounds.width, rect.width, "width:", 1e-6);
 		assertClose(bounds.height, rect.height, "height:", 1e-6);
+	});
+});
+
+describe("sceneRectMayCropRotatedImage", () => {
+	const image: CropImageElement = { x: 0, y: 0, width: 100, height: 40, angle: Math.PI / 4 };
+
+	it("skips a drag outside the rotated bounds", () => {
+		assert.equal(sceneRectMayCropRotatedImage(image, { x: 200, y: 200, width: 20, height: 20 }), false);
+	});
+
+	it("skips a drag covering the complete rotated bounds", () => {
+		assert.equal(sceneRectMayCropRotatedImage(image, { x: -100, y: -100, width: 300, height: 300 }), false);
+	});
+
+	it("keeps a partial overlap for precise polygon clipping", () => {
+		assert.equal(sceneRectMayCropRotatedImage(image, { x: 20, y: 0, width: 40, height: 40 }), true);
 	});
 });
 

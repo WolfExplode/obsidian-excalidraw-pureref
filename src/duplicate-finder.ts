@@ -27,7 +27,7 @@ interface DuplicateCandidateElement extends SceneElement {
 /**
  * The fileId of the element's PureRef custom crop source, if it has one. A
  * hold-C crop drag (crop-orchestrator.ts) materializes its result as a brand
- * new image element pointing at a freshly generated PNG -- a distinct
+ * new image element pointing at a freshly generated image -- a distinct
  * `fileId` from the image it was cropped out of -- and records where it came
  * from in `customData[VIEWPORT_CROP_KEY].sourceFileId`. Without reading that
  * back, a custom-cropped image's own fileId never matches anything else on
@@ -87,7 +87,7 @@ const TREAT_CROPS_AS_DUPLICATES = true;
  * exist here", independent of size/position. Whether a different crop of that
  * same fileId also counts is gated by TREAT_CROPS_AS_DUPLICATES: when on, a
  * PureRef custom crop is traced back to customCropSourceFileId() so it keys on
- * the file it was cropped FROM, not the disposable generated PNG it cropped
+ * the file it was cropped FROM, not the disposable generated image it cropped
  * TO; when off, crop dimensions (native crop) or the element's own fileId
  * (custom crop) are folded into the signature so every distinct crop is kept
  * separate from the source and from each other.

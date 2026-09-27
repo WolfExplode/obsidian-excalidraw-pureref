@@ -12,7 +12,7 @@ import { pickDirectoryForDomWindow } from "./electron";
  * baked into a freshly rendered PNG so the exported file matches what's
  * visible on the Board, not the full original. An image with no active crop
  * — including one this plugin's viewport-crop feature already materialized
- * into its own generated PNG (see excalidraw-view.ts) — is just copied
+ * into its own generated image (see crop-orchestrator.ts) — is just copied
  * byte-for-byte, since the vault file already *is* the cropped result.
  * Videos and other local embeds have no crop concept, so they're always
  * copied as-is.

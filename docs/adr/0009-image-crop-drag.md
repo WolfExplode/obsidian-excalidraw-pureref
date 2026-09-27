@@ -12,9 +12,14 @@ are cropped; if nothing is selected, the gesture is a no-op.
 It is bound per window and so works in the main window and every Popout.
 
 Upright images are driven through Excalidraw's own `crop` element field. Rotated
-images require a generated viewport PNG because a screen-aligned polygon cannot
+images require a generated viewport image because a screen-aligned polygon cannot
 be represented by that axis-aligned field. In both cases the full source image
 is retained, and the change is a single undoable step.
+
+The generated image uses quality-1 WebP for JPEG sources when a runtime round
+trip preserves alpha and differs from PNG by no more than four channel values
+at antialiased edges. Other sources and unsupported encoders use PNG. This
+reduces the bytes registered and reloaded for large photo Boards.
 
 ## Invariants and consequences
 

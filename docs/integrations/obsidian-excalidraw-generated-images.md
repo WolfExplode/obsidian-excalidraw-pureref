@@ -28,7 +28,7 @@ rendering, background save, and plugin reload.
 
 | Layer | Owns | Required operation |
 | --- | --- | --- |
-| Obsidian vault | PNG bytes and the `TFile` | `vault.createBinary()` at a normal, indexed path |
+| Obsidian vault | Generated image bytes and the `TFile` | `vault.createBinary()` at a normal, indexed path |
 | `ExcalidrawData.files` | Open-view mapping from element `fileId` to `EmbeddedFile` | Construct the generated-path record, call `setImage()`, then `setFile()` |
 | Excalidraw plugin `filesMaster` | Durable mapping used to rebuild `EmbeddedFile`s | Written by `ExcalidrawData.setFile()` |
 | Excalidraw core binary store/cache | Pixels for the immediate canvas renderer/exporter | `excalidrawAPI.addFiles()` |
@@ -39,7 +39,10 @@ rendering, background save, and plugin reload.
 1. Generate the new `fileId`, then choose a normal vault path beside the source
    image that includes that ID. This gives concurrent operations distinct,
    transaction-owned cleanup targets.
-2. Create the PNG with `vault.createBinary()`.
+2. Create the encoded image with `vault.createBinary()`. Use its actual MIME type
+   and matching `.png` or `.webp` extension throughout registration. The crop
+   renderer uses quality-1 WebP for JPEG sources only when its canvas encoder
+   passes a pixel round trip against PNG; otherwise it uses PNG.
 3. Construct an `EmbeddedFile` for the generated path, populate it with
    `setImage({ imgBase64, mimeType, size, ... })`, and register it through
    `ExcalidrawData.setFile()`.

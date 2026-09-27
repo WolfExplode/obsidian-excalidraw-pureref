@@ -11,6 +11,7 @@ import {
 	pointInsideConvexPolygon,
 	polygonBounds,
 	rotateVector,
+	sceneRectMayCropRotatedImage,
 	viewportCropToCurrentLocal,
 	type AffineTransform,
 	type CropPoint,
@@ -52,7 +53,7 @@ interface ViewportCropState {
 	sourceToLocal: AffineTransform;
 	/** The visible polygon in the current generated image's local pixels. */
 	polygon: CropPoint[];
-	/** Vault path of the generated PNG used by the current image element. */
+	/** Vault path of the generated image used by the current image element. */
 	generatedPath: string;
 }
 
@@ -63,6 +64,9 @@ interface ViewportCropState {
  * copy of this string.
  */
 export const VIEWPORT_CROP_KEY = "excalidrawPureRefViewportCrop";
+
+/** Keep large decoded images and encode canvases from piling up in one gesture. */
+const MAX_PARALLEL_CROP_PLANS = 32;
 
 function getViewportCropState(el: ImageSceneElement): ViewportCropState | null {
 	const value = el.customData?.[VIEWPORT_CROP_KEY];
@@ -93,7 +97,7 @@ function nextViewportFileId(): string {
 	return `eprviewport${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
 }
 
-function nextViewportPath(app: App, leaf: WorkspaceLeaf | null, elementId: string, fileId: string, sourcePath?: string): string {
+function nextViewportPath(app: App, leaf: WorkspaceLeaf | null, elementId: string, fileId: string, extension: "png" | "webp", sourcePath?: string): string {
 	// Keep the disposable crop beside its source. Falling back to the drawing is
 	// only for non-vault/legacy images whose source path cannot be recovered.
 	const sourceSlash = sourcePath?.lastIndexOf("/") ?? -1;
@@ -106,10 +110,10 @@ function nextViewportPath(app: App, leaf: WorkspaceLeaf | null, elementId: strin
 	// The transaction-unique fileId makes this path transaction-owned even when
 	// two crops of the same element plan concurrently before either writes.
 	const stem = `epr-viewport-${elementId}-${fileId}`;
-	let path = folder ? `${folder}/${stem}.png` : `${stem}.png`;
+	let path = folder ? `${folder}/${stem}.${extension}` : `${stem}.${extension}`;
 	let suffix = 1;
 	while (app.vault.getAbstractFileByPath(path)) {
-		path = folder ? `${folder}/${stem}-${suffix}.png` : `${stem}-${suffix}.png`;
+		path = folder ? `${folder}/${stem}-${suffix}.${extension}` : `${stem}-${suffix}.${extension}`;
 		suffix++;
 	}
 	return path;
@@ -132,13 +136,58 @@ function loadCanvasImage(dataURL: string): Promise<HTMLImageElement> {
 	});
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+function canvasToBlob(canvas: HTMLCanvasElement, mimeType: "image/png" | "image/webp", quality?: number): Promise<Blob> {
 	return new Promise((resolve, reject) => {
-		canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Unable to encode viewport crop PNG"))), "image/png");
+		canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Unable to encode viewport crop image"))), mimeType, quality);
 	});
 }
 
-async function renderViewportPng(
+let faithfulWebpSupport: Promise<boolean> | undefined;
+
+/** Check the running canvas encoder's alpha and color round trip once. */
+function canEncodeFaithfulWebp(): Promise<boolean> {
+	return faithfulWebpSupport ??= (async () => {
+		const canvas = window.document.createElement("canvas");
+		canvas.width = 8;
+		canvas.height = 8;
+		const context = canvas.getContext("2d");
+		if (!context) return false;
+		const original = context.createImageData(8, 8);
+		for (let i = 0; i < original.data.length; i += 4) {
+			original.data[i] = (i * 17) % 256;
+			original.data[i + 1] = (i * 23) % 256;
+			original.data[i + 2] = (i * 31) % 256;
+			original.data[i + 3] = [0, 64, 128, 192, 255][(i / 4) % 5];
+		}
+		context.putImageData(original, 0, 0);
+		const webp = await canvasToBlob(canvas, "image/webp", 1);
+		if (webp.type !== "image/webp") return false;
+		const png = await canvasToBlob(canvas, "image/png");
+		const decode = async (blob: Blob): Promise<Uint8ClampedArray> => {
+			const url = URL.createObjectURL(blob);
+			try {
+				const image = await loadCanvasImage(url);
+				const output = window.document.createElement("canvas");
+				output.width = 8;
+				output.height = 8;
+				const outputContext = output.getContext("2d");
+				if (!outputContext) throw new Error("Unable to check viewport crop image encoder");
+				outputContext.drawImage(image, 0, 0);
+				return outputContext.getImageData(0, 0, 8, 8).data;
+			} finally {
+				URL.revokeObjectURL(url);
+			}
+		};
+		const expected = await decode(png);
+		const actual = await decode(webp);
+		for (let i = 0; i < expected.length; i++) {
+			if (Math.abs(expected[i] - actual[i]) > (i % 4 === 3 ? 0 : 4)) return false;
+		}
+		return true;
+	})().catch(() => false);
+}
+
+async function renderViewportImage(
 	dataURL: string,
 	sourceWidth: number,
 	sourceHeight: number,
@@ -147,7 +196,7 @@ async function renderViewportPng(
 	polygon: readonly CropPoint[],
 	sourceToLocal: AffineTransform,
 	sourceIsDarkThemed: boolean,
-): Promise<{ dataURL: string; data: ArrayBuffer; width: number; height: number }> {
+): Promise<{ dataURL: string; data: ArrayBuffer; mimeType: "image/png" | "image/webp"; extension: "png" | "webp"; width: number; height: number }> {
 	const image = await loadCanvasImage(dataURL);
 	const sourceScaleX = Math.hypot(sourceToLocal.a, sourceToLocal.b);
 	const sourceScaleY = Math.hypot(sourceToLocal.c, sourceToLocal.d);
@@ -181,9 +230,25 @@ async function renderViewportPng(
 	context.drawImage(image, 0, 0, sourceWidth, sourceHeight);
 	context.restore();
 
-	const blob = await canvasToBlob(canvas);
-	const data = await blob.arrayBuffer();
-	return { dataURL: canvas.toDataURL("image/png"), data, width: canvas.width, height: canvas.height };
+	const preferWebp = /^data:image\/(?:jpeg|jfif)[;,]/i.test(dataURL) && await canEncodeFaithfulWebp();
+	const blob = await canvasToBlob(canvas, preferWebp ? "image/webp" : "image/png", preferWebp ? 1 : undefined);
+	const width = canvas.width;
+	const height = canvas.height;
+	canvas.width = 0;
+	canvas.height = 0;
+	// Excalidraw needs a data URL and the vault needs bytes. Convert the one
+	// encoded image instead of asking the canvas to encode its pixels twice.
+	const [data, outputDataURL] = await Promise.all([
+		blob.arrayBuffer(),
+		new Promise<string>((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => resolve(reader.result as string);
+			reader.onerror = () => reject(reader.error ?? new Error("Unable to read viewport crop image"));
+			reader.readAsDataURL(blob);
+		}),
+	]);
+	const mimeType = blob.type === "image/webp" ? "image/webp" : "image/png";
+	return { dataURL: outputDataURL, data, mimeType, extension: mimeType === "image/webp" ? "webp" : "png", width, height };
 }
 
 interface ViewportCropPlan {
@@ -193,6 +258,7 @@ interface ViewportCropPlan {
 	fileData: ArrayBuffer;
 	fileWidth: number;
 	fileHeight: number;
+	fileMimeType: "image/png" | "image/webp";
 	generatedPath: string;
 	previousGeneratedPath?: string;
 }
@@ -210,13 +276,6 @@ async function planViewportCrop(
 	const existing = getViewportCropState(el);
 	const sourceFileId = existing?.sourceFileId ?? el.fileId;
 	if (!sourceFileId) return null;
-	const sourceBinary = await generatedImages.recoverSourceBinary(
-		sourceFileId,
-		existing?.sourcePath ?? getSourcePath(leaf, sourceFileId),
-		sourceIsDarkThemed,
-	);
-	if (!sourceBinary) return null;
-	const sourceDataURL = sourceBinary.dataURL;
 	const viewportToCurrent = existing
 		? viewportCropToCurrentLocal(el, existing, generatedNatural)
 		: null;
@@ -250,8 +309,20 @@ async function planViewportCrop(
 	const sourceToOutput = multiplyAffine(sceneToOutput, multiplyAffine(toScene, currentSourceToLocal));
 	const baseCrop = existing?.baseCrop ?? el.crop ?? null;
 	const sourcePath = existing?.sourcePath ?? getSourcePath(leaf, sourceFileId);
+	const sourceBinary = await generatedImages.recoverSourceBinary(sourceFileId, sourcePath, sourceIsDarkThemed);
+	if (!sourceBinary) return null;
+	const rendered = await renderViewportImage(
+		sourceBinary.dataURL,
+		existing?.sourceNaturalWidth ?? sourceNatural.w,
+		existing?.sourceNaturalHeight ?? sourceNatural.h,
+		bounds.width,
+		bounds.height,
+		nextPolygon,
+		sourceToOutput,
+		sourceIsDarkThemed,
+	);
 	const fileId = nextViewportFileId();
-	const generatedPath = nextViewportPath(app, leaf, el.id, fileId, sourcePath);
+	const generatedPath = nextViewportPath(app, leaf, el.id, fileId, rendered.extension, sourcePath);
 	const state: ViewportCropState = {
 		version: 1,
 		sourceFileId,
@@ -263,22 +334,13 @@ async function planViewportCrop(
 		polygon: nextPolygon,
 		generatedPath,
 	};
-	const png = await renderViewportPng(
-		sourceDataURL,
-		existing?.sourceNaturalWidth ?? sourceNatural.w,
-		existing?.sourceNaturalHeight ?? sourceNatural.h,
-		bounds.width,
-		bounds.height,
-		nextPolygon,
-		sourceToOutput,
-		sourceIsDarkThemed,
-	);
 	return {
 		fileId,
-		fileDataURL: png.dataURL,
-		fileData: png.data,
-		fileWidth: png.width,
-		fileHeight: png.height,
+		fileDataURL: rendered.dataURL,
+		fileData: rendered.data,
+		fileWidth: rendered.width,
+		fileHeight: rendered.height,
+		fileMimeType: rendered.mimeType,
 		generatedPath,
 		previousGeneratedPath: existing?.generatedPath,
 		 element: {
@@ -291,7 +353,7 @@ async function planViewportCrop(
 			crop: null,
 			fileId,
 			// The source transform above already includes the original image's
-			// flip. The generated PNG itself is in normal canvas orientation.
+			// flip. The generated image itself is in normal canvas orientation.
 			scale: [1, 1],
 			customData: { ...(el.customData ?? {}), [VIEWPORT_CROP_KEY]: state },
 		},
@@ -402,9 +464,15 @@ export async function cropImagesToSceneRect(
 		version: el.version,
 		versionNonce: el.versionNonce,
 	}]));
-	await Promise.all(
-		targets.map(async (el) => {
+	let nextTarget = 0;
+	const planTargets = async () => {
+		while (nextTarget < targets.length) {
+			const el = targets[nextTarget++];
 			const viewport = getViewportCropState(el);
+			if (!viewport && el.angle && Math.abs(el.angle) > 1e-6 && !sceneRectMayCropRotatedImage(el, rect)) {
+				result.skipped.push(el.id);
+				continue;
+			}
 			// `sourceNatural` is the original image retained by a viewport crop;
 			// `elementNatural` is the PNG currently attached to the element. They
 			// diverge once a custom crop has been materialized, and the latter is
@@ -417,12 +485,12 @@ export async function cropImagesToSceneRect(
 					: null;
 			if (!elementNatural) {
 				result.skipped.push(el.id);
-				return;
+				continue;
 			}
 			const sourceNatural = viewport
 				? { w: viewport.sourceNaturalWidth, h: viewport.sourceNaturalHeight }
 				: elementNatural;
-			const viewportPlan = (el.angle && Math.abs(el.angle) > 1e-6) || getViewportCropState(el)
+			const viewportPlan = (el.angle && Math.abs(el.angle) > 1e-6) || viewport
 				? await planViewportCrop(app, leaf, transactionAdapter, el, rect, sourceNatural, elementNatural, sourceIsDarkThemed)
 				: null;
 			if (viewportPlan) {
@@ -444,7 +512,7 @@ export async function cropImagesToSceneRect(
 					binary: {
 						id: viewportPlan.fileId,
 						dataURL: viewportPlan.fileDataURL,
-						mimeType: "image/png",
+						mimeType: viewportPlan.fileMimeType,
 						created: Date.now(),
 					},
 					size: { width: viewportPlan.fileWidth, height: viewportPlan.fileHeight },
@@ -454,16 +522,17 @@ export async function cropImagesToSceneRect(
 						generatedFilesToDelete.push({ fileId: el.fileId, path: viewportPlan.previousGeneratedPath });
 					}
 				}
-				return;
+				continue;
 			}
 			const plan = planImageCrop(el, rect, elementNatural);
 			if (!plan) {
 				result.skipped.push(el.id);
-				return;
+				continue;
 			}
 			plans.set(el.id, plan);
-		}),
-	);
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(MAX_PARALLEL_CROP_PLANS, targets.length) }, () => planTargets()));
 	if (plans.size === 0) return result;
 	const changes: GeneratedImageChange[] = [...plans].map(([id, patch]) => ({
 		id,
@@ -535,7 +604,7 @@ export async function uncropImages(app: App, leaf: WorkspaceLeaf | null, ids?: r
 			const nw = viewport.sourceNaturalWidth;
 			const nh = viewport.sourceNaturalHeight;
 			const sourceCrop = crop ?? { x: 0, y: 0, width: nw, height: nh };
-			// The generated viewport PNG may itself have been natively cropped before
+			// The generated viewport image may itself have been natively cropped before
 			// this double-click. Fold that generated-PNG crop back into the original
 			// source transform, otherwise the restored element is offset by the crop
 			// origin (and becomes increasingly wrong after repeated operations).
@@ -578,7 +647,7 @@ export async function uncropImages(app: App, leaf: WorkspaceLeaf | null, ids?: r
 					crop: crop ?? null,
 					// The affine transform above contains any original or subsequently
 					// applied mirror. Encode its handedness exactly once in the restored
-					// element; retaining the generated PNG's scale would mirror it twice.
+					// element; retaining the generated image's scale would mirror it twice.
 					scale: [1, orientation < 0 ? -1 : 1],
 					customData: Object.keys(customData).length ? customData : undefined,
 				},

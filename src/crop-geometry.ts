@@ -227,7 +227,7 @@ export function filePixelsToCurrentLocal(el: CropImageElement, natural: { w: num
 /**
  * Restores the coordinate relationship for a materialized viewport crop.
  *
- * A viewport crop starts as a generated PNG whose local coordinate system is
+ * A viewport crop starts as a generated image whose local coordinate system is
  * the bounding box of `state.polygon`. Excalidraw can subsequently native-crop,
  * flip, resize, and rotate that PNG. Its native crop is expressed in PNG pixels,
  * whereas the saved polygon/source transform is expressed in the original local
@@ -254,6 +254,28 @@ export function viewportCropToCurrentLocal(
 export function localPolygonForSceneRect(el: CropImageElement, rect: SceneRect): CropPoint[] | null {
 	const inverse = invertAffine(elementLocalToScene(el));
 	return inverse ? sceneRectPolygon(rect).map((p) => applyAffine(inverse, p)) : null;
+}
+
+/**
+ * Cheap rejection before decoding an original rotated image. Its visible pixels
+ * are contained by the rotated box's scene AABB. A disjoint drag cannot crop it;
+ * a drag covering that entire AABB cannot remove any of its pixels.
+ */
+export function sceneRectMayCropRotatedImage(el: CropImageElement, rect: SceneRect): boolean {
+	const transform = elementLocalToScene(el);
+	const bounds = polygonBounds([
+		applyAffine(transform, { x: 0, y: 0 }),
+		applyAffine(transform, { x: el.width, y: 0 }),
+		applyAffine(transform, { x: el.width, y: el.height }),
+		applyAffine(transform, { x: 0, y: el.height }),
+	]);
+	if (!bounds) return false;
+	const overlapWidth = Math.min(bounds.x + bounds.width, rect.x + rect.width) - Math.max(bounds.x, rect.x);
+	const overlapHeight = Math.min(bounds.y + bounds.height, rect.y + rect.height) - Math.max(bounds.y, rect.y);
+	if (overlapWidth < MIN_CROP_SCENE || overlapHeight < MIN_CROP_SCENE) return false;
+	return rect.x > bounds.x || rect.y > bounds.y ||
+		rect.x + rect.width < bounds.x + bounds.width ||
+		rect.y + rect.height < bounds.y + bounds.height;
 }
 
 /**

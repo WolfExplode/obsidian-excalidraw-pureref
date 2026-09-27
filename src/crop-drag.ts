@@ -117,7 +117,7 @@ export function attachCropDrag(win: Window, app: App, hotkeys: HotkeyStore): () 
 		if (event.key === "Enter") {
 			const leaf = getActiveExcalidrawLeaf(app);
 			// A custom crop is materialized as an ordinary image, but native crop
-			// must not edit that generated PNG. Alt+double-click is the explicit
+			// must not edit that generated image. Alt+double-click is the explicit
 			// way to remove the custom layer.
 			if (getViewportCropImageIds(leaf, true).length) {
 				event.preventDefault();

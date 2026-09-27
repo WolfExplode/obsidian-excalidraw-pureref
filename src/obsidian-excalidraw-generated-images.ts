@@ -81,7 +81,7 @@ export function createObsidianGeneratedImageAdapter(
 			}
 			generated.setImage({
 				imgBase64: asset.binary.dataURL,
-				mimeType: "image/png",
+				mimeType: asset.binary.mimeType,
 				size: asset.size,
 				isDark: false,
 				isSVGwithBitmap: false,
