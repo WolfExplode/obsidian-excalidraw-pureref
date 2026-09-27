@@ -41,6 +41,7 @@ import { applyChromeHiding } from "./chrome-hider";
 import { attachPopoutDropBridge } from "./popout-drop-bridge";
 import { promptPureRefDrop } from "./pur2-import";
 import { attachInsertModalAutoConfirm } from "./insert-modal-autoconfirm";
+import { attachImportConflictBatch } from "./import-conflict-batch";
 import { attachBoardGestures } from "./board-gestures";
 import { ExcalidrawRefitSuspender } from "./excalidraw-settings";
 import {
@@ -838,9 +839,14 @@ export class PopoutManager {
 
 		entry.detachWindowDrag = attachWindowDrag(doc, newWindowId);
 		entry.detachChromeHiding = applyChromeHiding(doc);
-		entry.detachDropBridge = attachPopoutDropBridge(doc, {
+		const detachImportConflicts = attachImportConflictBatch(doc);
+		const detachDropBridge = attachPopoutDropBridge(doc, {
 			onPureRefDrop: (event, files, link) => promptPureRefDrop(this.plugin, event, files, link),
 		});
+		entry.detachDropBridge = () => {
+			detachImportConflicts();
+			detachDropBridge();
+		};
 		entry.detachInsertModal = attachInsertModalAutoConfirm(doc);
 		if (doc.defaultView) {
 			entry.detachGestures = attachBoardGestures(doc.defaultView, this.plugin.app, {
