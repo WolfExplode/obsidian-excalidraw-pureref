@@ -92,10 +92,9 @@ setting globally, the normal Board view is affected for that interval too.
   [Obsidian wikilink-unsafe attachment names](../integrations/obsidian-wikilink-attachment-names.md).
 - If Excalidraw's “Insert File From Vault” dialog presents exactly one choice,
   the plugin selects it automatically.
-- When a multi-file drop finds files already in the Vault, **Ctrl-click** (or
-  **Cmd-click** on macOS) **Use the file already in the Vault instead of importing**
-  in one conflict prompt to choose it for the other conflicts in that drop.
-  A new drop resets the choice.
+- When a multi-file drop finds files already in the Vault, choose **Use existing
+  for all files in this drop** in one conflict prompt to select the existing
+  Vault file for the other conflicts in that drop. A new drop resets the choice.
 - Inserted local videos and animated images are resized to their intrinsic aspect
   ratio after Excalidraw has added them.
 - For a single external `.gif`/`.webp`/`.apng` drop, Excalidraw offers its
