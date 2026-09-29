@@ -1,14 +1,32 @@
-import { Modal, Notice, Setting, base64ToArrayBuffer, type App, type WorkspaceLeaf } from "obsidian";
+import { Modal, Notice, Setting, base64ToArrayBuffer, type App, type TFile, type WorkspaceLeaf } from "obsidian";
+import { localLinkpath, snapshotEmbeddableFile } from "./board-render";
 import { pickPureRefExportPath, writeExternalFile } from "./electron";
 import { getExcalidrawApi, getExcalidrawData, getExcalidrawFileForLeaf, getExcalidrawView, type SceneElement } from "./excalidraw-view";
 import { writePureRef1Images, type PureRefExportImage, type PureRefExportText } from "./pur1-writer";
 import { writePureRef2Scene, type PureRef2Item } from "./pur2-writer";
+import { RAW_PUREREF_FORMATS, pngSize, rasterSize } from "./raster-header";
 
 interface ExportImageElement extends SceneElement {
 	fileId?: string;
 	crop?: { x: number; y: number; width: number; height: number } | null;
 	text?: string;
 	fontSize?: number;
+	link?: string | null;
+}
+
+/**
+ * Embeddable file types exported as images. The Board shows them through
+ * another plugin's embed renderer, not as Excalidraw image elements; PureRef
+ * 2.x stores the raw formats verbatim, and EXR (like every 1.x image) goes
+ * through that renderer's raster as a PNG, which is what PureRef does too.
+ */
+const EMBEDDED_IMAGE_EXTENSIONS = new Set([...Object.keys(RAW_PUREREF_FORMATS), "exr"]);
+
+function linkedImageFile(app: App, element: ExportImageElement, boardPath: string): TFile | null {
+	if (element.type !== "embeddable") return null;
+	const linkpath = localLinkpath(element.link);
+	const file = linkpath ? app.metadataCache.getFirstLinkpathDest(linkpath, boardPath) : null;
+	return file && EMBEDDED_IMAGE_EXTENSIONS.has(file.extension.toLowerCase()) ? file : null;
 }
 
 function loadImage(owner: Window, source: string): Promise<HTMLImageElement> {
@@ -111,7 +129,7 @@ export async function exportBoardToPureRef(app: App, leaf: WorkspaceLeaf, versio
 		if (getExcalidrawFileForLeaf(leaf)?.path !== board.path) throw new Error("The Board changed during export");
 		const elements = sceneElements.filter((el): el is ExportImageElement =>
 			!el.isDeleted && (scope === "board" || !!selectedIds[el.id])
-				&& (el.type === "image" || el.type === "text" && !el.containerId));
+				&& (el.type === "image" || el.type === "embeddable" || el.type === "text" && !el.containerId));
 		if (elements.length === 0) {
 			new Notice(scope === "selected" ? "The selection has no images or standalone text to export."
 				: "This Board has no images or text to export.");
@@ -135,6 +153,31 @@ export async function exportBoardToPureRef(app: App, leaf: WorkspaceLeaf, versio
 					y: (y + element.height / 4) * 4, fontSize: fontSize / 2, order: index + 1 });
 				items2.push({ kind: "text", text: element.text, x, y,
 					width: element.width, height: element.height, fontSize, opacity: (element.opacity ?? 100) / 100 });
+				continue;
+			}
+			if (element.type === "embeddable") {
+				const file = linkedImageFile(app, element, board.path);
+				if (!file) { skipped++; continue; }
+				const placement = { x: element.x, y: element.y, width: element.width, height: element.height,
+					angle: element.angle ?? 0, flipX: false, flipY: false, opacity: (element.opacity ?? 100) / 100 };
+				const rawFormat = version === "2.x" ? RAW_PUREREF_FORMATS[file.extension.toLowerCase()] : undefined;
+				if (rawFormat) {
+					const bytes = new Uint8Array(await app.vault.readBinary(file));
+					const size = rasterSize(rawFormat, bytes);
+					if (size) {
+						items2.push({ kind: "image", data: bytes, format: rawFormat, sourceWidth: size.width, sourceHeight: size.height,
+							crop: { x: 0, y: 0, ...size }, ...placement });
+						continue;
+					}
+				}
+				const snapshot = await snapshotEmbeddableFile(app, file);
+				if (!snapshot) { skipped++; continue; }
+				if (version === "1.x") { images.push({ ...await flattenImage(owner, element, snapshot), order: index + 1 }); continue; }
+				const png = imageData(snapshot)!.bytes;
+				const size = pngSize(png);
+				if (!size) { skipped++; continue; }
+				items2.push({ kind: "image", data: png, format: "png", sourceWidth: size.width, sourceHeight: size.height,
+					crop: { x: 0, y: 0, ...size }, ...placement });
 				continue;
 			}
 			if (!element.fileId) { skipped++; continue; }

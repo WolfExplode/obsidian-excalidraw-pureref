@@ -1,10 +1,12 @@
 import { md5Hex } from "./md5";
+import type { RawPureRefFormat } from "./raster-header";
 import initSqlJs from "sql.js/dist/sql-asm-memory-growth.js";
 
 export interface PureRef2Image {
 	kind: "image";
 	data: Uint8Array;
-	format: "png" | "jpg" | "gif";
+	/** Raw formats carry the untouched source file, as PureRef itself stores them. */
+	format: "png" | "jpg" | "gif" | RawPureRefFormat;
 	sourceWidth: number;
 	sourceHeight: number;
 	crop: { x: number; y: number; width: number; height: number };

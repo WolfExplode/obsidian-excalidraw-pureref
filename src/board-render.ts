@@ -1,4 +1,4 @@
-import type { TFile } from "obsidian";
+import type { App, TFile } from "obsidian";
 import type ExcalidrawPureRefPlugin from "../main";
 import type { FrontLayer, MediaOverlay } from "./transparent-proto";
 import { frontLayerClipPath, planReadOnlyFrontLayer } from "./front-of-embed-layer";
@@ -309,13 +309,13 @@ const snapshotCache = new Map<string, SnapshotCacheEntry>();
  * workers / three.js / pdf.js infrastructure already lives — only the
  * resulting raster crosses into the transparent read-only window.
  */
-async function snapshotEmbeddableFile(plugin: ExcalidrawPureRefPlugin, file: TFile): Promise<string | null> {
+export async function snapshotEmbeddableFile(app: App, file: TFile): Promise<string | null> {
 	const cached = snapshotCache.get(file.path);
 	if (cached && cached.mtime === file.stat.mtime && cached.size === file.stat.size) {
 		return cached.dataURL;
 	}
 
-	const registry = (plugin.app as unknown as { embedRegistry?: EmbedRegistryLike }).embedRegistry;
+	const registry = (app as unknown as { embedRegistry?: EmbedRegistryLike }).embedRegistry;
 	const creator = registry?.getEmbedCreator?.(file);
 	if (!creator) return null;
 
@@ -324,7 +324,7 @@ async function snapshotEmbeddableFile(plugin: ExcalidrawPureRefPlugin, file: TFi
 
 	let embed: EmbedComponentLike | null = null;
 	try {
-		embed = creator({ app: plugin.app, containerEl: container }, file);
+		embed = creator({ app, containerEl: container }, file);
 		embed.load?.();
 		const ready = embed.loadFile ? embed.loadFile() : Promise.resolve();
 		const outcome = await withTimeout(ready, SNAPSHOT_TIMEOUT_MS);
@@ -390,7 +390,7 @@ export async function collectExtensionOverlays(
 		const height = el.height ?? 0;
 		const angle = el.angle ?? 0;
 		tasks.push(
-			snapshotEmbeddableFile(plugin, dest).then((src) => {
+			snapshotEmbeddableFile(plugin.app, dest).then((src) => {
 				if (src) overlays.push({ kind: "image", src, x, y, width, height, angle });
 			}),
 		);
