@@ -340,7 +340,7 @@ async function snapshotEmbeddableFile(plugin: ExcalidrawPureRefPlugin, file: TFi
 		} else {
 			const img = container.querySelector("img");
 			if (img && img.complete && img.naturalWidth > 0) {
-				const out = document.createElement("canvas");
+				const out = createEl("canvas");
 				out.width = img.naturalWidth;
 				out.height = img.naturalHeight;
 				out.getContext("2d")?.drawImage(img, 0, 0);

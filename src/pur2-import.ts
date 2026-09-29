@@ -1,6 +1,6 @@
-import { Modal, Notice, Setting, type TFile, type WorkspaceLeaf } from "obsidian";
+import { Modal, Notice, Setting, arrayBufferToBase64, base64ToArrayBuffer, type TFile, type WorkspaceLeaf } from "obsidian";
 import type ExcalidrawPureRefPlugin from "../main";
-import { pickPureRefFileForDomWindow } from "./electron";
+import { pickPureRefFileForDomWindow, readExternalFile } from "./electron";
 import { DEFAULT_IMAGE_SCALE, findExcalidrawLeafForNode, getExcalidrawApi, getExcalidrawFileForLeaf, getExcalidrawView } from "./excalidraw-view";
 import { readPureRefScene, transformPoint, type Point, type PureRefImage, type PureRefItem, type PureRefScene } from "./pur2-reader";
 
@@ -89,7 +89,7 @@ function imageMime(format: string): string {
 function imageExtension(format: string): string { return format === "jpeg" ? "jpg" : format; }
 
 async function decodeImage(data: Uint8Array, format: string): Promise<HTMLImageElement> {
-	const src = `data:${imageMime(format)};base64,${Buffer.from(data).toString("base64")}`;
+	const src = `data:${imageMime(format)};base64,${arrayBufferToBase64(data.slice().buffer)}`;
 	const image = new Image();
 	image.src = src;
 	await image.decode();
@@ -98,7 +98,7 @@ async function decodeImage(data: Uint8Array, format: string): Promise<HTMLImageE
 
 function canvasPng(canvas: HTMLCanvasElement): Uint8Array {
 	const dataUrl = canvas.toDataURL("image/png");
-	return new Uint8Array(Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64"));
+	return new Uint8Array(base64ToArrayBuffer(dataUrl.slice(dataUrl.indexOf(",") + 1)));
 }
 
 async function renderPlacement(
@@ -124,7 +124,7 @@ async function renderPlacement(
 	}
 	const imageNode = await decodeImage(image.data, image.format);
 	const pixelScale = Math.min(1, 8192 / Math.max(rect.width, rect.height), Math.sqrt(16_000_000 / (rect.width * rect.height)));
-	const canvas = document.createElement("canvas");
+	const canvas = createEl("canvas");
 	canvas.width = Math.max(1, Math.ceil(rect.width * pixelScale));
 	canvas.height = Math.max(1, Math.ceil(rect.height * pixelScale));
 	const ctx = canvas.getContext("2d");
@@ -164,8 +164,16 @@ function noteFontSize(html: string): number {
 	return pixelSize(parsed.body.style.fontSize) ?? 22;
 }
 
+/** File name without directory or extension; accepts both Windows and POSIX separators. */
+function fileStem(pathOrName: string): string {
+	const base = pathOrName.split(/[\\/]/).pop() ?? pathOrName;
+	const dot = base.lastIndexOf(".");
+	return dot > 0 ? base.slice(0, dot) : base;
+}
+
 function safeName(name: string): string {
-	return name.replace(/[<>:"/\\|?*\x00-\x1f\[\]#^]/g, "_").trim().slice(0, 90) || "PureRef import";
+	const printable = Array.from(name, (char) => (char.charCodeAt(0) < 0x20 ? "_" : char)).join("");
+	return printable.replace(/[<>:"/\\|?*[\]#^]/g, "_").trim().slice(0, 90) || "PureRef import";
 }
 
 function opacity(value: number): number {
@@ -191,7 +199,6 @@ function inheritedAppearance(scene: PureRefScene, item: PureRefItem): { opacity:
 async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf, sourceName: string, source: Uint8Array): Promise<string> {
 	const boardFile = getExcalidrawFileForLeaf(leaf);
 	if (!boardFile || !getExcalidrawApi(leaf)) throw new Error("Open an Excalidraw Board before importing");
-	const path = (window as Window & { require: (name: string) => typeof import("path") }).require("path");
 	const scene = await readPureRefScene(source);
 	const itemById = new Map(scene.items.map((item) => [item.id, item]));
 	const imageById = new Map(scene.images.map((image) => [image.id, image]));
@@ -202,7 +209,7 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 		if (!item || !image) throw new Error(`PureRef image item ${placed.id} has a missing reference`);
 		placements.push(await renderPlacement(scene, item, placed, image));
 	}
-	const stem = safeName(path.basename(sourceName, path.extname(sourceName)));
+	const stem = safeName(fileStem(sourceName));
 	if (getExcalidrawFileForLeaf(leaf)?.path !== boardFile.path || !getExcalidrawApi(leaf)) {
 		throw new Error("The target Board closed while the PureRef file was loading");
 	}
@@ -261,8 +268,9 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 				// those pixels into PureRef scene coordinates, just as it does images.
 				const fontSize = declaredSize * scale * DEFAULT_IMAGE_SCALE;
 				if (!Number.isFinite(fontSize) || fontSize <= 0) throw new Error(`PureRef note ${item.id} has invalid text size`);
-				automate.style.fontSize = fontSize;
-				automate.style.fontFamily = 2; // Helvetica is Excalidraw's closest Open Sans match.
+				// ExcalidrawAutomate's element style, not a DOM style. Font family 2
+				// (Helvetica) is Excalidraw's closest Open Sans match.
+				Object.assign(automate.style, { fontSize, fontFamily: 2 });
 				const id = automate.addText(
 					position.x * DEFAULT_IMAGE_SCALE, position.y * DEFAULT_IMAGE_SCALE, text);
 				automate.style.fontSize = originalFontSize;
@@ -293,7 +301,7 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 		// elements were rejected. Keep their attachments so any accepted image
 		// remains valid; before that point these files are exclusively ours.
 		if (!commitAttempted) {
-			for (const file of created.reverse()) await plugin.app.vault.delete(file).catch(() => undefined);
+			for (const file of created.reverse()) await plugin.app.fileManager.trashFile(file).catch(() => undefined);
 		}
 		throw error;
 	} finally {
@@ -307,8 +315,7 @@ export async function importPureRefFile(plugin: ExcalidrawPureRefPlugin, leaf: W
 		const file = await pickPureRefFileForDomWindow(owner);
 		if (!file) return;
 		new Notice("Importing PureRef scene…");
-		const fs = (window as Window & { require: (name: string) => typeof import("fs") }).require("fs");
-		const board = await importScene(plugin, leaf, file, new Uint8Array(await fs.promises.readFile(file)));
+		const board = await importScene(plugin, leaf, file, await readExternalFile(file));
 		new Notice(`Imported PureRef scene into ${board}`);
 	} catch (error) {
 		console.error("[Excalidraw PureRef] import failed", error);

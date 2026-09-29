@@ -1,4 +1,4 @@
-import type { App, WorkspaceLeaf } from "obsidian";
+import type { App } from "obsidian";
 import type ExcalidrawPureRefPlugin from "../main";
 import { isExcalidrawLeaf, resetSelectedRotation } from "./excalidraw-view";
 
@@ -46,7 +46,7 @@ export function attachRotationResetHotkey(plugin: ExcalidrawPureRefPlugin): () =
 		name: "Reset selected rotation",
 		callback: () => {
 			const leaf = app.workspace.getMostRecentLeaf();
-			if (isExcalidrawLeaf(leaf)) resetSelectedRotation(leaf as WorkspaceLeaf);
+			if (isExcalidrawLeaf(leaf)) resetSelectedRotation(leaf);
 		},
 	});
 

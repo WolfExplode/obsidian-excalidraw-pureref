@@ -1,5 +1,5 @@
-import { Modal, Notice, Setting, type App, type WorkspaceLeaf } from "obsidian";
-import { pickPureRefExportPath } from "./electron";
+import { Modal, Notice, Setting, base64ToArrayBuffer, type App, type WorkspaceLeaf } from "obsidian";
+import { pickPureRefExportPath, writeExternalFile } from "./electron";
 import { getExcalidrawApi, getExcalidrawData, getExcalidrawFileForLeaf, getExcalidrawView, type SceneElement } from "./excalidraw-view";
 import { writePureRef1Images, type PureRefExportImage, type PureRefExportText } from "./pur1-writer";
 import { writePureRef2Scene, type PureRef2Item } from "./pur2-writer";
@@ -13,7 +13,7 @@ interface ExportImageElement extends SceneElement {
 
 function loadImage(owner: Window, source: string): Promise<HTMLImageElement> {
 	return new Promise((resolve, reject) => {
-		const image = owner.document.createElement("img");
+		const image = owner.createEl("img");
 		image.onload = () => resolve(image);
 		image.onerror = () => reject(new Error("Could not decode a Board image"));
 		image.src = source;
@@ -33,7 +33,7 @@ async function flattenImage(owner: Window, element: ExportImageElement, source: 
 	}
 	const pixelsPerBoardUnit = Math.min(crop.width / element.width, crop.height / element.height,
 		8192 / Math.max(boardWidth, boardHeight), Math.sqrt(16_000_000 / (boardWidth * boardHeight)));
-	const canvas = owner.document.createElement("canvas");
+	const canvas = owner.createEl("canvas");
 	canvas.width = Math.max(1, Math.ceil(boardWidth * pixelsPerBoardUnit));
 	canvas.height = Math.max(1, Math.ceil(boardHeight * pixelsPerBoardUnit));
 	const ctx = canvas.getContext("2d");
@@ -47,7 +47,7 @@ async function flattenImage(owner: Window, element: ExportImageElement, source: 
 		element.width * pixelsPerBoardUnit, element.height * pixelsPerBoardUnit);
 	const dataUrl = canvas.toDataURL("image/png");
 	return {
-		png: new Uint8Array(Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64")),
+		png: new Uint8Array(base64ToArrayBuffer(dataUrl.slice(dataUrl.indexOf(",") + 1))),
 		x: (element.x + (element.width - boardWidth) / 2) * 4,
 		y: (element.y + (element.height - boardHeight) / 2) * 4,
 		width: boardWidth * 4,
@@ -57,14 +57,14 @@ async function flattenImage(owner: Window, element: ExportImageElement, source: 
 
 function imageData(source: string): { mime: string; bytes: Uint8Array } | null {
 	const match = /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(source);
-	return match ? { mime: match[1].toLowerCase(), bytes: new Uint8Array(Buffer.from(source.slice(match[0].length), "base64")) } : null;
+	return match ? { mime: match[1].toLowerCase(), bytes: new Uint8Array(base64ToArrayBuffer(source.slice(match[0].length))) } : null;
 }
 
 function thumbnail(owner: Window): Uint8Array {
-	const canvas = owner.document.createElement("canvas");
+	const canvas = owner.createEl("canvas");
 	canvas.width = 1; canvas.height = 1;
 	const jpeg = canvas.toDataURL("image/jpeg", 0.7);
-	return new Uint8Array(Buffer.from(jpeg.slice(jpeg.indexOf(",") + 1), "base64"));
+	return new Uint8Array(base64ToArrayBuffer(jpeg.slice(jpeg.indexOf(",") + 1)));
 }
 
 type ExportScope = "selected" | "board";
@@ -166,8 +166,7 @@ export async function exportBoardToPureRef(app: App, leaf: WorkspaceLeaf, versio
 		}
 		if (getExcalidrawFileForLeaf(leaf)?.path !== board.path) throw new Error("The Board changed during export");
 		const bytes = version === "1.x" ? writePureRef1Images(images, notes) : await writePureRef2Scene(items2, thumbnail(owner));
-		const fs = (window as Window & { require: (id: string) => typeof import("fs") }).require("fs");
-		await fs.promises.writeFile(destination, bytes);
+		await writeExternalFile(destination, bytes);
 		new Notice(`Exported ${version} PureRef file to ${destination}${skipped ? ` (${skipped} unsupported items skipped)` : ""}`);
 	} catch (error) {
 		console.error("[Excalidraw PureRef] PureRef export failed", error);

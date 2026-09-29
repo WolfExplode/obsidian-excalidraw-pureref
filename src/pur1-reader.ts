@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { md5Hex } from "./md5";
 import type { Matrix, Point, PureRefScene } from "./pur2-reader";
 
 /** PureRef 1.10's flat Qt stream (also written by PureRef 1.11.1). */
@@ -38,7 +38,7 @@ export function readPureRef1Scene(data: Uint8Array): PureRefScene {
 	if (versionFieldBytes !== 10 && versionFieldBytes !== 12) throw new Error("Invalid PureRef 1.x header");
 	const headerShift = versionFieldBytes - 12;
 	const checksumAt = 44 + headerShift;
-	if (utf16(checksumAt, 64) !== createHash("md5").update(data.subarray(108 + headerShift)).digest("hex")) {
+	if (utf16(checksumAt, 64) !== md5Hex(data.subarray(108 + headerShift))) {
 		throw new Error("PureRef 1.x checksum mismatch");
 	}
 	const rootCount = u16(12);

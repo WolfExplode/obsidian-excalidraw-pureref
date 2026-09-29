@@ -99,3 +99,9 @@ body.epr-popout-mode .view-content {
 	pointer-events: none;
 	z-index: 2;
 }
+
+/* "Use existing for all files in this drop" row added to Excalidraw's
+   import-conflict prompt (src/import-conflict-batch.ts). */
+.epr-import-conflict-all {
+	padding: 8px 14px;
+}

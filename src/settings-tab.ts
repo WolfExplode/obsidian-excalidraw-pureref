@@ -99,7 +99,7 @@ export class ExcalidrawPureRefSettingTab extends PluginSettingTab {
 		);
 
 		if (globalConflicts.length > 0) {
-			const warning = setting.descEl.createEl("span", { text: ` Already bound to ${describeGlobalConflicts(globalConflicts)}.` });
+			const warning = setting.descEl.createSpan({ text: ` Already bound to ${describeGlobalConflicts(globalConflicts)}.` });
 			warning.setCssStyles({ color: "var(--text-error)" });
 		}
 	}

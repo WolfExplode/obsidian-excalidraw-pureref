@@ -119,14 +119,14 @@ function probeNaturalSize(win: Window, url: string, kind: "video" | "image"): Pr
 		const timer = win.setTimeout(() => finish(null), 15000);
 
 		if (kind === "video") {
-			const v = win.document.createElement("video");
+			const v = win.createEl("video");
 			v.preload = "metadata";
 			v.muted = true;
 			v.onloadedmetadata = () => finish(v.videoWidth > 0 && v.videoHeight > 0 ? { w: v.videoWidth, h: v.videoHeight } : null);
 			v.onerror = () => finish(null);
 			v.src = url;
 		} else {
-			const img = win.document.createElement("img");
+			const img = win.createEl("img");
 			img.onload = () => finish(img.naturalWidth > 0 && img.naturalHeight > 0 ? { w: img.naturalWidth, h: img.naturalHeight } : null);
 			img.onerror = () => finish(null);
 			img.src = url;

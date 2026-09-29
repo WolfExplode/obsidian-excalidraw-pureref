@@ -152,7 +152,7 @@ export function createObsidianGeneratedImageAdapter(
 		deleteAttachment: async (path) => {
 			const indexed = app.vault.getAbstractFileByPath(path);
 			if (indexed) {
-				await app.vault.delete(indexed);
+				await app.fileManager.trashFile(indexed);
 				return;
 			}
 			// Compatibility cleanup for dot-prefixed attachments created by older builds.

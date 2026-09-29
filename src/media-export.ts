@@ -163,7 +163,7 @@ function collectSelectedItems(app: App, leaf: WorkspaceLeaf): ExportItem[] {
 
 function loadImage(win: Window, dataURL: string): Promise<HTMLImageElement> {
 	return new Promise((resolve, reject) => {
-		const img = win.document.createElement("img");
+		const img = win.createEl("img");
 		img.onload = () => resolve(img);
 		img.onerror = () => reject(new Error("Unable to decode source image for export crop"));
 		img.src = dataURL;
@@ -191,7 +191,7 @@ async function renderCroppedPng(
 	flipY: boolean,
 ): Promise<ArrayBuffer> {
 	const image = await loadImage(win, dataURL);
-	const canvas = win.document.createElement("canvas");
+	const canvas = win.createEl("canvas");
 	canvas.width = Math.max(1, Math.round(crop.width));
 	canvas.height = Math.max(1, Math.round(crop.height));
 	const ctx = canvas.getContext("2d");

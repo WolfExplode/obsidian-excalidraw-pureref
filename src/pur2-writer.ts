@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { md5Hex } from "./md5";
 import initSqlJs from "sql.js/dist/sql-asm-memory-growth.js";
 
 export interface PureRef2Image {
@@ -79,7 +79,8 @@ function painterPath(width: number, height: number): Uint8Array {
 }
 
 function sortOrder(position: number): Uint8Array {
-	const bytes = Uint8Array.from(Buffer.from("00000400000000000c426967526174696f6e616c000000000100000000000000010000000100000001000000000000000100000001", "hex"));
+	const hex = "00000400000000000c426967526174696f6e616c000000000100000000000000010000000100000001000000000000000100000001";
+	const bytes = Uint8Array.from({ length: hex.length / 2 }, (_, i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16));
 	new DataView(bytes.buffer).setUint32(33, position, false);
 	return bytes;
 }
@@ -134,7 +135,7 @@ export async function writePureRef2Scene(items: readonly PureRef2Item[], thumbna
 				const tx = -crop.x - crop.width / 2;
 				const ty = -crop.y - crop.height / 2;
 				db.run("INSERT INTO images VALUES (?,?,?,?,?,?,?,?,?)", [id, 1, "", "", item.format,
-					createHash("md5").update(item.data).digest("hex"), item.data, sourceWidth, sourceHeight]);
+					md5Hex(item.data), item.data, sourceWidth, sourceHeight]);
 				db.run("INSERT INTO items VALUES (?,?,?,CAST(? AS TEXT),CAST(? AS TEXT),?,?,?,?)", [-1, id, null,
 					qtTextBytes(matrix(cosine * sx, sine * sx, -sine * sy, cosine * sy, cx, cy)), qtTextBytes(sortOrder(id + 1)), id + 1,
 					Math.max(0, Math.min(1, item.opacity)), 0, null]);
@@ -181,6 +182,6 @@ export async function writePureRef2Scene(items: readonly PureRef2Item[], thumbna
 	output.set(thumbnail, 108);
 	output.set(database.subarray(frontSize), frontSize);
 	output.set(database.subarray(0, frontSize), database.length);
-	putUtf16(40, createHash("md5").update(output.subarray(104)).digest("hex"));
+	putUtf16(40, md5Hex(output.subarray(104)));
 	return output;
 }

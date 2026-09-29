@@ -59,10 +59,9 @@ export function attachImportConflictBatch(doc: Document): () => void {
 				continue;
 			}
 			if (modal.querySelector(".epr-import-conflict-all")) continue;
-			const wrapper = doc.createElement("div");
+			const wrapper = doc.win.createDiv();
 			wrapper.className = "epr-import-conflict-all";
-			wrapper.style.cssText = "padding: 8px 14px;";
-			const button = doc.createElement("button");
+			const button = doc.win.createEl("button");
 			button.type = "button";
 			button.textContent = "Use existing for all files in this drop";
 			button.addEventListener("click", (event) => {
@@ -87,7 +86,7 @@ export function attachImportConflictBatch(doc: Document): () => void {
 			const target = mutation.target as Element;
 			if (target.closest?.(".prompt")) return true;
 			return Array.from(mutation.addedNodes).some((node) =>
-				node instanceof win.Element && (node.matches(".prompt") || !!node.querySelector(".prompt")),
+				node.instanceOf(win.Element) &&(node.matches(".prompt") || !!node.querySelector(".prompt")),
 			);
 		})) scan();
 	});

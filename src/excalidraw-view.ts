@@ -862,7 +862,7 @@ export function makeNaturalSizeResolver(win: Window, files: Record<string, { dat
 		const promise: Promise<{ w: number; h: number } | null> = !dataURL
 			? Promise.resolve(null)
 			: new Promise((resolve) => {
-					const img = win.document.createElement("img");
+					const img = win.createEl("img");
 					img.onload = () =>
 						resolve(img.naturalWidth > 0 && img.naturalHeight > 0 ? { w: img.naturalWidth, h: img.naturalHeight } : null);
 					img.onerror = () => resolve(null);

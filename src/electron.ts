@@ -243,6 +243,30 @@ export async function pickPureRefExportPath(target: Window | null, defaultPath: 
 	return result.canceled ? null : result.filePath ?? null;
 }
 
+/** The slice of Node's `fs` used for PureRef files outside the vault. */
+interface ExternalFs {
+	promises: {
+		readFile(path: string): Promise<Uint8Array>;
+		writeFile(path: string, data: Uint8Array): Promise<void>;
+	};
+}
+
+function getExternalFs(): ExternalFs {
+	const electronRequire = getElectronRequire();
+	if (!electronRequire) throw new Error("File system access is unavailable");
+	return electronRequire("fs") as ExternalFs;
+}
+
+/** Reads a file chosen through the native dialog, which may lie outside the vault. */
+export async function readExternalFile(path: string): Promise<Uint8Array> {
+	return new Uint8Array(await getExternalFs().promises.readFile(path));
+}
+
+/** Writes a file to a path chosen through the native dialog, which may lie outside the vault. */
+export async function writeExternalFile(path: string, data: Uint8Array): Promise<void> {
+	await getExternalFs().promises.writeFile(path, data);
+}
+
 export function adjustWindowOpacityById(id: number, delta: number): number | null {
 	const win = getBrowserWindowById(id);
 	if (!win) return null;

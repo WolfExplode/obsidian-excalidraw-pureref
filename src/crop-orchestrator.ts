@@ -129,7 +129,7 @@ function getSourcePath(leaf: WorkspaceLeaf | null, fileId: string): string | und
 
 function loadCanvasImage(dataURL: string): Promise<HTMLImageElement> {
 	return new Promise((resolve, reject) => {
-		const image = window.document.createElement("img");
+		const image = createEl("img");
 		image.onload = () => resolve(image);
 		image.onerror = () => reject(new Error("Unable to decode source image for viewport crop"));
 		image.src = dataURL;
@@ -147,7 +147,7 @@ let faithfulWebpSupport: Promise<boolean> | undefined;
 /** Check the running canvas encoder's alpha and color round trip once. */
 function canEncodeFaithfulWebp(): Promise<boolean> {
 	return faithfulWebpSupport ??= (async () => {
-		const canvas = window.document.createElement("canvas");
+		const canvas = createEl("canvas");
 		canvas.width = 8;
 		canvas.height = 8;
 		const context = canvas.getContext("2d");
@@ -167,7 +167,7 @@ function canEncodeFaithfulWebp(): Promise<boolean> {
 			const url = URL.createObjectURL(blob);
 			try {
 				const image = await loadCanvasImage(url);
-				const output = window.document.createElement("canvas");
+				const output = createEl("canvas");
 				output.width = 8;
 				output.height = 8;
 				const outputContext = output.getContext("2d");
@@ -201,7 +201,7 @@ async function renderViewportImage(
 	const sourceScaleX = Math.hypot(sourceToLocal.a, sourceToLocal.b);
 	const sourceScaleY = Math.hypot(sourceToLocal.c, sourceToLocal.d);
 	const pixelDensity = Math.max(1, Math.min(4, 1 / Math.max(1e-6, Math.min(sourceScaleX, sourceScaleY))));
-	const canvas = window.document.createElement("canvas");
+	const canvas = createEl("canvas");
 	canvas.width = Math.max(1, Math.ceil(outputWidth * pixelDensity));
 	canvas.height = Math.max(1, Math.ceil(outputHeight * pixelDensity));
 	const context = canvas.getContext("2d");

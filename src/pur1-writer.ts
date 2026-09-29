@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { md5Hex } from "./md5";
 
 /** A flattened PNG at its desired PureRef location, in PureRef pixels. */
 export interface PureRefExportImage {
@@ -155,7 +155,7 @@ export function writePureRef1Images(images: readonly PureRefExportImage[], notes
 	const view = new DataView(result.buffer);
 	itemEnds.forEach(({ at, end }) => view.setBigUint64(at, BigInt(end), false));
 	view.setBigUint64(16, BigInt(headerView.getBigUint64(16, false)), false);
-	const checksum = createHash("md5").update(result.subarray(108)).digest("hex");
+	const checksum = md5Hex(result.subarray(108));
 	for (let i = 0; i < checksum.length; i++) view.setUint16(44 + i * 2, checksum.charCodeAt(i), false);
 	return result;
 }

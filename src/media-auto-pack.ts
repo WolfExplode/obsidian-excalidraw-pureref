@@ -378,7 +378,7 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 			state[counter]++;
 			let result: Promise<unknown>;
 			try {
-				result = original.call(this, ...args);
+				result = original.call(this, ...args) as Promise<unknown>;
 			} catch (error) {
 				state[counter]--;
 				notifyNativeIdle(state);

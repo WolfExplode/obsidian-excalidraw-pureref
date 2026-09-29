@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { md5Hex } from "./md5";
 import initSqlJs from "sql.js/dist/sql-asm-memory-growth.js";
 import { readPureRef1Scene } from "./pur1-reader";
 
@@ -133,7 +133,7 @@ export function databaseFromPur(data: Uint8Array): Uint8Array {
 		throw new Error("Invalid PureRef database length");
 	}
 	const checksum = readUtf16Be(data, 40, 64);
-	if (createHash("md5").update(data.subarray(104)).digest("hex") !== checksum) throw new Error("PureRef checksum mismatch");
+	if (md5Hex(data.subarray(104)) !== checksum) throw new Error("PureRef checksum mismatch");
 	if (new TextDecoder().decode(data.subarray(databaseSize, databaseSize + 16)) !== "SQLite format 3\0") {
 		throw new Error("PureRef SQLite header is missing");
 	}
@@ -166,7 +166,7 @@ export async function readPureRefScene(data: Uint8Array): Promise<PureRefScene> 
 		}));
 		const images = query(db, "SELECT id,format,checksum,data,width,height FROM images").map((row) => {
 			const data = bytes(row.data, "image data");
-			if (createHash("md5").update(data).digest("hex") !== row.checksum) throw new Error(`Image ${row.id} checksum mismatch`);
+			if (md5Hex(data) !== row.checksum) throw new Error(`Image ${String(row.id)} checksum mismatch`);
 			return { id: number(row.id, "image ID"), format: String(row.format).toLowerCase(), data,
 				width: number(row.width, "image width"), height: number(row.height, "image height") };
 		});

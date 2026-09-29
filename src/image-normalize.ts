@@ -96,7 +96,7 @@ export async function normalizeSelectedImages(leaf: WorkspaceLeaf | null, mode: 
 			const dataURL = image.fileId ? files[image.fileId]?.dataURL : undefined;
 			if (!dataURL) return null;
 			return new Promise<{ width: number; height: number } | null>((resolve) => {
-				const decoded = win.document.createElement("img");
+				const decoded = win.createEl("img");
 				decoded.onload = () => resolve(decoded.naturalWidth > 0 ? { width: decoded.naturalWidth, height: decoded.naturalHeight } : null);
 				decoded.onerror = () => resolve(null);
 				decoded.src = dataURL;
