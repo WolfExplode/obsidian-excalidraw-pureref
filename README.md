@@ -18,7 +18,8 @@ See the complete [interaction reference](docs/behavior/user-interaction-override
 - **Opacity control** **Ctrl+−/+** adjusts selected-element opacity, or the
   whole Popout window's opacity when nothing is selected.
   
-https://github.com/user-attachments/assets/b30dba76-fb94-49ec-b3e8-ca915fdcafd4
+<img width="1280" height="694" alt="Pureref Mode" src="https://github.com/user-attachments/assets/9fba44d2-e3e9-482a-bd6a-4936fda09262" />
+
 
 ### **Image crop, flip, and transform**
   - Hold **C** and drag to crop selected images to a rectangle.
@@ -29,7 +30,8 @@ https://github.com/user-attachments/assets/b30dba76-fb94-49ec-b3e8-ca915fdcafd4
   - Blender-style **G** / **R** / **S** move, rotate, and scale. 
   - **Alt+R** to reset rotation; **Alt+S** to set image scale to 25% of native size.
 
-https://github.com/user-attachments/assets/fda37d9a-c42b-4f69-adbe-68710d3f4a9d
+<img width="800" height="521" alt="Cropping" src="https://github.com/user-attachments/assets/5ec937e7-2bca-4d0c-8743-80487d1f6a66" />
+
 
 ### **Arrangement and packing**
   - **Ctrl+Arrow** packs selected references toward an edge. **Ctrl+Shift+P**
@@ -60,19 +62,22 @@ https://github.com/user-attachments/assets/fda37d9a-c42b-4f69-adbe-68710d3f4a9d
   - **Ctrl+Shift+E** exports every selected image/video/embed to a folder,
     rendering cropped images to a fresh PNG of just the visible crop.
 
-https://github.com/user-attachments/assets/ef692124-d11f-45e1-9bf0-eae5ea1d6914
+<img width="800" height="450" alt="Import Export" src="https://github.com/user-attachments/assets/263fe816-1e85-4c2e-a283-85778edf55ef" />
+
 
 ### **Find Duplicates** Right-click (or **Ctrl/Cmd+F**) with one element
   selected to find and select every other element on the Board that matches
   it by file, link, or geometry.
 
-https://github.com/user-attachments/assets/f46d778a-d19e-4333-923e-546536047d4a
+<img width="800" height="453" alt="Find duplicates" src="https://github.com/user-attachments/assets/f55f880c-7a0d-407d-b4c4-94f7f4dafe39" />
+
 
 ### **Draw on Embeddables**
 
 - In default Excalidraw, nothing can ever be drawn or placed in front of a video/PDF/markdown/web embed. This plugin fixes that.
 
-https://github.com/user-attachments/assets/6fabca8b-9dae-4148-8c86-74e51e6ee2b9
+<img width="800" height="467" alt="Draw on embeddables" src="https://github.com/user-attachments/assets/f2e0b113-7297-4e7f-bfab-0e711aa71a4a" />
+
 
 ## Requirements
 
