@@ -23,6 +23,7 @@ https://github.com/user-attachments/assets/b30dba76-fb94-49ec-b3e8-ca915fdcafd4
 ### **Image crop, flip, and transform**
   - Hold **C** and drag to crop selected images to a rectangle.
   - **Alt+Shift-drag** to flip selected images horizontally or vertically.
+  - **Ctrl-drag** a rectangle to remove elements from the current selection.
   - **Alt+double-click** to remove a crop. Double-click a custom-cropped image
     to open Excalidraw's native crop editor.
   - Blender-style **G** / **R** / **S** move, rotate, and scale. 

@@ -151,6 +151,13 @@ export const HOTKEY_ACTIONS: readonly HotkeyActionDef[] = [
 		kind: "modifier",
 		default: [{ modifiers: ["Alt", "Shift"], key: null }],
 	},
+	{
+		id: "deselect-drag-modifier",
+		name: "Box deselect (drag modifier)",
+		desc: "Held while dragging a rectangle over the Board, removes the selected elements it catches from the selection. A click without dragging keeps its normal meaning.",
+		kind: "modifier",
+		default: [{ modifiers: ["Mod"], key: null }],
+	},
 ];
 
 export function getHotkeyAction(id: string): HotkeyActionDef | undefined {

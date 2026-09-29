@@ -2,6 +2,7 @@ import type { App } from "obsidian";
 import { attachAltDragDuplicateBlocker } from "./alt-drag";
 import { attachContextMenuTrim } from "./context-menu-trim";
 import { attachCropDrag } from "./crop-drag";
+import { attachDeselectDrag } from "./deselect-drag";
 import { attachDuplicateFinder } from "./duplicate-finder";
 import { attachFlipDrag } from "./flip-drag";
 import type { HotkeyStore } from "./hotkey-store";
@@ -21,7 +22,7 @@ export interface BoardGestureOptions {
 
 /**
  * Binds every PureRef Board gesture to one window: pack, z-order, opacity,
- * hold-C crop, Alt+Shift flip, Alt-drag duplicate blocking, Blender-style
+ * hold-C crop, Alt+Shift flip, Ctrl-drag box deselect, Alt-drag duplicate blocking, Blender-style
  * modal transforms, the Normalize submenu, Find Duplicates, and trimming
  * Cut/Copy/Paste from the context menu. `main.ts` and
  * `popout-manager.ts` both call this instead of wiring each gesture
@@ -38,6 +39,7 @@ export function attachBoardGestures(win: Window, app: App, options: BoardGesture
 		attachZOrderKeydown(win, app, hotkeys),
 		attachCropDrag(win, app, hotkeys),
 		attachFlipDrag(win, app, hotkeys),
+		attachDeselectDrag(win, app, hotkeys),
 		attachAltDragDuplicateBlocker(win, app),
 		attachTransformKeydown(win, app, hotkeys),
 		attachImageNormalize(win, app, hotkeys),

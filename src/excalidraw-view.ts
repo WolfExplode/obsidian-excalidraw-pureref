@@ -84,6 +84,7 @@ export interface ExcalidrawApi {
 		zenModeEnabled?: boolean;
 		boxSelectionMode?: "contain" | "overlap";
 		selectedElementIds?: Record<string, boolean>;
+		selectedGroupIds?: Record<string, boolean>;
 		/** Non-null while an iframe/embeddable owns interactive focus. */
 		activeEmbeddable?: { element?: { id?: string }; state?: "hover" | "active" } | null;
 		/** Non-null while Excalidraw is editing inside a group's constituents. */
@@ -1058,6 +1059,19 @@ export function sceneToClientCoords(leaf: WorkspaceLeaf | null, sceneX: number, 
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * Replaces the selection. Selection is appState, not scene data, so this adds
+ * no undo entry and does not dirty the file. Clears `selectedLinearElement`,
+ * whose point-editing handles would otherwise outlive a removed line/arrow.
+ */
+export function setSelection(
+	leaf: WorkspaceLeaf | null,
+	selectedElementIds: Record<string, boolean>,
+	selectedGroupIds: Record<string, boolean>,
+): boolean {
+	return updateExcalidrawScene(leaf, { selectedElementIds, selectedGroupIds, selectedLinearElement: null });
 }
 
 /** The canvas which owns Excalidraw's native React pointer handlers for a leaf. */
