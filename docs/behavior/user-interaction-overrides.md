@@ -73,6 +73,21 @@ to a normal move so it cannot duplicate a newly clicked element.
   canvas" whenever exactly one element is selected; with nothing selected (or
   more than one element), Ctrl/Cmd+F still opens the native Find as usual.
 
+## Board search
+
+Excalidraw's Find panel (Ctrl/Cmd+F with no single-element selection) retains
+its native text and frame-name results and adds **Files, links & types** results.
+These search the current Board's image filenames and vault paths, embedded-file
+links, external image URLs, MIME types, and element types, case-insensitively.
+For example, `.jpg` finds JPEG images (including `.jpeg` and unnamed JPEG
+binaries), `.mp4` finds linked videos, and `rectangle` finds rectangle elements.
+Search does not inspect image pixels or the contents of embedded documents.
+
+Click a metadata result to select and center it at the current zoom, or use
+**Select all matches** to select the matching elements together. Results update
+as the Board changes and work in both the main view and editable Popouts.
+The existing single-element Ctrl/Cmd+F Find Duplicates gesture remains available.
+
 ## Board selection count
 
 The main window's bottom-right status bar shows the active Board's selected

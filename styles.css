@@ -135,3 +135,24 @@ body.epr-popout-mode .view-content {
 .epr-gif-controls input[type="range"] { width: 100px; min-width: 30px; }
 .epr-gif-controls span { white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
 .epr-gif-controls select { width: 58px; padding: 2px; }
+.epr-board-search-results {
+	padding: 0.75rem;
+	border-top: 1px solid var(--background-modifier-border);
+}
+.epr-board-search-results:empty { display: none; }
+.layer-ui__search > .layer-ui__search-result-container { order: 1; }
+.epr-board-search-heading { margin-bottom: 0.5rem; font-size: 0.85em; }
+.epr-board-search-list { max-height: 45vh; overflow-y: auto; margin-top: 0.5rem; }
+.epr-board-search-list button {
+	display: block;
+	width: 100%;
+	text-align: left;
+	white-space: normal;
+	overflow-wrap: anywhere;
+	height: auto;
+	padding: 0.5rem;
+	margin-bottom: 0.25rem;
+}
+/* Retain native text navigation; suppress its empty-state message only when
+   the host plugin has results. React keeps ownership of the native nodes. */
+.epr-has-search-matches .layer-ui__search-count:not(:has(.result-nav)) { display: none; }

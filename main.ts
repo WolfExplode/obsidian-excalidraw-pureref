@@ -14,6 +14,7 @@ import { attachVideoAspectCorrector } from "src/video-aspect";
 import { attachMediaAutoPack } from "src/media-auto-pack";
 import { attachGifControls } from "src/gif-controls";
 import { attachSelectionStatus } from "src/selection-status";
+import { attachBoardSearch } from "src/board-search";
 import { attachFrontOfEmbedRendering } from "src/front-of-embed-view";
 import { installCropDebugHook } from "src/crop-drag";
 import { attachRotationResetHotkey } from "src/rotation-reset-hotkey";
@@ -90,6 +91,7 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 		this.register(attachMediaAutoPack(this));
 		this.register(attachGifControls(this));
 		this.register(attachSelectionStatus(this));
+		this.register(attachBoardSearch(this));
 		this.register(attachImportConflictBatch(window.document));
 		this.register(attachPopoutDropBridge(window.document, {
 			alwaysBridge: false,
