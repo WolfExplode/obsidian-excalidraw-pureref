@@ -21,9 +21,29 @@ other placements are flattened to transparent PNGs to preserve their visible
 crop and transform. Notes become editable text. Group hierarchy contributes
 to placement geometry, and items are added in Z order.
 
+SVG and other browser-supported image formats use Excalidraw's image loader.
+Formats requiring an Obsidian renderer (for example TIFF, TGA, DDS, HDR, or PSD)
+are extracted unchanged into vault attachments and inserted as file embeddables,
+allowing registered renderers such as extended-file-support to display them.
+For cropped or transformed placements, the importer snapshots the registered
+renderer and flattens that raster using the same placement geometry. The original
+extended-format attachment is retained. If no usable snapshot is available, the
+original file is still inserted as an embed at its placement bounding box, with
+a notice that its crop/transform could not be reproduced. Displaying such an
+embed requires a renderer registered for that extension; extraction does not.
+
 PureRef placement coordinates and image dimensions map to 25% of their source
 values on the Board, matching Alt+S's default image scale. PureRef's image
-resizing and relative layout are retained. Notes take their font size from the
+resizing and relative layout are retained. After measuring the imported images
+and notes, the importer translates them together so their bounding-box center
+lands at the drop point, captured in Board coordinates before the choice prompt
+opens. Command-palette imports use the visible Board center captured before the
+file picker opens. The source file's absolute origin does not affect placement,
+and the Board's camera stays unchanged. This also applies to 1.x imports.
+After insertion, the imported images and notes become the selection. When
+several `.pur` files are dropped together, the selection includes the elements
+successfully imported from every file in that drop.
+Notes take their font size from the
 PureRef rich text (including inline overrides) and item transform, then use the
 same 25% coordinate conversion as images. A native 9 pt note, for example,
 stores a 12 px inline font size; multiplying that by the note transform gives
@@ -37,5 +57,6 @@ Legacy plain-text notes use PureRef's 22 px default.
 PureRef 2.x pen strokes are outside this import. This version also does not
 recreate editable PureRef groups or note rich-text styling. Flattened animated
 images retain the visible frame; unflattened GIFs keep their source file.
-Unsupported image formats or perspective transforms fail visibly rather than
-silently producing a misplaced element.
+Unsupported perspective transforms and corrupt native images fail visibly
+rather than silently producing a misplaced element. Unknown image formats do
+not reject the import merely because they are absent from a native format list.

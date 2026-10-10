@@ -1,8 +1,11 @@
 import { Modal, Notice, Setting, arrayBufferToBase64, base64ToArrayBuffer, type TFile, type WorkspaceLeaf } from "obsidian";
 import type ExcalidrawPureRefPlugin from "../main";
 import { pickPureRefFileForDomWindow, readExternalFile } from "./electron";
-import { DEFAULT_IMAGE_SCALE, findExcalidrawLeafForNode, getExcalidrawApi, getExcalidrawFileForLeaf, getExcalidrawView } from "./excalidraw-view";
+import { DEFAULT_IMAGE_SCALE, clientToSceneCoords, findExcalidrawLeafForNode, getExcalidrawApi, getExcalidrawFileForLeaf, getExcalidrawView, readSceneView } from "./excalidraw-view";
 import { readPureRefScene, transformPoint, type Point, type PureRefImage, type PureRefItem, type PureRefScene } from "./pur2-reader";
+import { centerPureRefImport } from "./pur-import-placement";
+import { pureRefImageMime, pureRefImageExtension } from "./pur-import-format";
+import { snapshotEmbeddableFile } from "./board-render";
 
 interface AutomateElement {
 	x: number;
@@ -17,9 +20,11 @@ interface ExcalidrawAutomateImport {
 	getAPI?(view: unknown): ExcalidrawAutomateImport;
 	style: { fontSize: number; fontFamily: number };
 	addImage(x: number, y: number, file: TFile, scale?: boolean, anchor?: boolean): Promise<string | null>;
+	addEmbeddable(x: number, y: number, width: number, height: number, url?: string, file?: TFile): string | null;
 	addText(x: number, y: number, text: string): string;
 	getElement(id: string): AutomateElement;
 	addElementsToView(repositionToCursor?: boolean, save?: boolean, newElementsOnTop?: boolean): Promise<boolean>;
+	selectElementsInView(elements: string[]): void;
 }
 
 interface RenderedPlacement {
@@ -31,6 +36,8 @@ interface RenderedPlacement {
 	height: number;
 	data: Uint8Array | null;
 	format: string;
+	/** No renderer was available to bake this placement's crop/transform. */
+	unflattened?: boolean;
 }
 
 function getAutomate(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf): ExcalidrawAutomateImport {
@@ -80,16 +87,13 @@ function fullAxisAligned(image: PureRefImage, source: Point[], clip: Point[]): b
 		&& image.width > 0 && image.height > 0;
 }
 
-function imageMime(format: string): string {
-	const normalized = format === "jpg" ? "jpeg" : format;
-	if (!["png", "jpeg", "gif", "webp", "bmp"].includes(normalized)) throw new Error(`Unsupported PureRef image format: ${format}`);
-	return `image/${normalized}`;
+async function decodeImage(data: Uint8Array, format: string): Promise<HTMLImageElement> {
+	const mime = pureRefImageMime(format);
+	if (!mime) throw new Error(`No native image decoder for PureRef format: ${format}`);
+	return decodeImageUrl(`data:${mime};base64,${arrayBufferToBase64(data.slice().buffer)}`);
 }
 
-function imageExtension(format: string): string { return format === "jpeg" ? "jpg" : format; }
-
-async function decodeImage(data: Uint8Array, format: string): Promise<HTMLImageElement> {
-	const src = `data:${imageMime(format)};base64,${arrayBufferToBase64(data.slice().buffer)}`;
+async function decodeImageUrl(src: string): Promise<HTMLImageElement> {
 	const image = new Image();
 	image.src = src;
 	await image.decode();
@@ -106,6 +110,7 @@ async function renderPlacement(
 	item: PureRefItem,
 	imageItem: PureRefScene["imageItems"][number],
 	image: PureRefImage,
+	decode: () => Promise<HTMLImageElement | null>,
 ): Promise<RenderedPlacement> {
 	const mapSource = (point: Point) => chain(scene, item, transformPoint(imageItem.imageTransform, point));
 	const source = [mapSource({ x: 0, y: 0 }), mapSource({ x: image.width, y: 0 }),
@@ -122,7 +127,11 @@ async function renderPlacement(
 	if (!near(p2.x, p1.x + p3.x - p0.x) || !near(p2.y, p1.y + p3.y - p0.y)) {
 		throw new Error(`Image item ${item.id} uses an unsupported perspective transform`);
 	}
-	const imageNode = await decodeImage(image.data, image.format);
+	const imageNode = await decode();
+	// Preserve the original file as an embed even without a working renderer.
+	// Its bounding box still lands with the rest of the import; report the loss
+	// of crop/transform rather than rejecting the whole PureRef file.
+	if (!imageNode) return { item, imageId: image.id, ...rect, data: null, format: image.format, unflattened: true };
 	const pixelScale = Math.min(1, 8192 / Math.max(rect.width, rect.height), Math.sqrt(16_000_000 / (rect.width * rect.height)));
 	const canvas = createEl("canvas");
 	canvas.width = Math.max(1, Math.ceil(rect.width * pixelScale));
@@ -196,18 +205,22 @@ function inheritedAppearance(scene: PureRefScene, item: PureRefItem): { opacity:
 	return { opacity: opacity(opacityFraction), locked };
 }
 
-async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf, sourceName: string, source: Uint8Array): Promise<string> {
+function importViewCenter(leaf: WorkspaceLeaf): Point {
+	const view = readSceneView(leaf);
+	if (!view) throw new Error("The target Board's viewport is unavailable");
+	return { x: view.cx, y: view.cy };
+}
+
+async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf, sourceName: string, source: Uint8Array, target: Point, batchElementIds: string[] = []): Promise<string> {
 	const boardFile = getExcalidrawFileForLeaf(leaf);
 	if (!boardFile || !getExcalidrawApi(leaf)) throw new Error("Open an Excalidraw Board before importing");
 	const scene = await readPureRefScene(source);
 	const itemById = new Map(scene.items.map((item) => [item.id, item]));
 	const imageById = new Map(scene.images.map((image) => [image.id, image]));
-	for (const image of scene.images) imageMime(image.format);
 	const placements: RenderedPlacement[] = [];
 	for (const placed of scene.imageItems) {
 		const item = itemById.get(placed.id), image = imageById.get(placed.imageId);
 		if (!item || !image) throw new Error(`PureRef image item ${placed.id} has a missing reference`);
-		placements.push(await renderPlacement(scene, item, placed, image));
 	}
 	const stem = safeName(fileStem(sourceName));
 	if (getExcalidrawFileForLeaf(leaf)?.path !== boardFile.path || !getExcalidrawApi(leaf)) {
@@ -220,14 +233,39 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 	const created: TFile[] = [];
 	let commitAttempted = false;
 	try {
-		const neededOriginals = new Set(placements.filter((placement) => !placement.data).map((placement) => placement.imageId));
-		for (const image of scene.images.filter((image) => neededOriginals.has(image.id))) {
+		const saveOriginal = async (image: PureRefImage): Promise<TFile> => {
 			const attachmentPath = await plugin.app.fileManager.getAvailablePathForAttachment(
-				`${stem}-source-${image.id}.${imageExtension(image.format)}`, boardFile.path);
-			const file = await plugin.app.vault.createBinary(attachmentPath,
-				image.data.slice().buffer);
+				`${stem}-source-${image.id}.${pureRefImageExtension(image.format)}`, boardFile.path);
+			const file = await plugin.app.vault.createBinary(attachmentPath, image.data.slice().buffer);
 			originalFiles.set(image.id, file);
 			created.push(file);
+			return file;
+		};
+		// Extended renderers read vault files, so stage their originals before
+		// baking transformed placements. All staged files share the rollback below.
+		const referencedImages = new Set(scene.imageItems.map((placed) => placed.imageId));
+		for (const image of scene.images) {
+			if (referencedImages.has(image.id) && !pureRefImageMime(image.format)) await saveOriginal(image);
+		}
+		const decoded = new Map<number, Promise<HTMLImageElement | null>>();
+		const decode = (image: PureRefImage): Promise<HTMLImageElement | null> => {
+			let pending = decoded.get(image.id);
+			if (!pending) {
+				pending = pureRefImageMime(image.format) ? decodeImage(image.data, image.format) : (async () => {
+					const snapshot = await snapshotEmbeddableFile(plugin.app, originalFiles.get(image.id)!);
+					return snapshot ? decodeImageUrl(snapshot).catch(() => null) : null;
+				})();
+				decoded.set(image.id, pending);
+			}
+			return pending;
+		};
+		for (const placed of scene.imageItems) {
+			const image = imageById.get(placed.imageId)!;
+			placements.push(await renderPlacement(scene, itemById.get(placed.id)!, placed, image, () => decode(image)));
+		}
+		const neededOriginals = new Set(placements.filter((placement) => !placement.data).map((placement) => placement.imageId));
+		for (const image of scene.images.filter((image) => neededOriginals.has(image.id))) {
+			if (!originalFiles.has(image.id)) await saveOriginal(image);
 		}
 		const flattenedFiles = new Map<number, TFile>();
 		for (const placement of placements) {
@@ -242,6 +280,8 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 			...placements.map((placement) => ({ kind: "image" as const, item: placement.item, placement })),
 			...scene.notes.map((note) => ({ kind: "note" as const, item: itemById.get(note.id), note })),
 		].filter((entry) => entry.item).sort((a, b) => a.item!.z - b.item!.z || a.item!.id - b.item!.id);
+		const importedElements: AutomateElement[] = [];
+		const importedIds: string[] = [];
 		for (const entry of ordered) {
 			const item = entry.item!;
 			const appearance = inheritedAppearance(scene, item);
@@ -249,14 +289,19 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 				const placement = entry.placement;
 				const file = flattenedFiles.get(item.id) ?? originalFiles.get(placement.imageId);
 				if (!file) throw new Error(`Missing imported image ${placement.imageId}`);
-				const id = await automate.addImage(
-					placement.x * DEFAULT_IMAGE_SCALE, placement.y * DEFAULT_IMAGE_SCALE, file, false, false);
+				const x = placement.x * DEFAULT_IMAGE_SCALE, y = placement.y * DEFAULT_IMAGE_SCALE;
+				const id = pureRefImageMime(placement.format)
+					? await automate.addImage(x, y, file, false, false)
+					: automate.addEmbeddable(x, y, placement.width * DEFAULT_IMAGE_SCALE,
+						placement.height * DEFAULT_IMAGE_SCALE, undefined, file);
 				if (!id) throw new Error(`Excalidraw could not load image ${file.name}`);
 				const element = automate.getElement(id);
 				element.width = placement.width * DEFAULT_IMAGE_SCALE;
 				element.height = placement.height * DEFAULT_IMAGE_SCALE;
 				element.opacity = appearance.opacity;
 				element.locked = appearance.locked;
+				importedElements.push(element);
+				importedIds.push(id);
 			} else {
 				const text = noteText(entry.note.html);
 				if (!text) continue;
@@ -286,8 +331,11 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 				element.y += fontSize / 2;
 				element.opacity = appearance.opacity;
 				element.locked = appearance.locked;
+				importedElements.push(element);
+				importedIds.push(id);
 			}
 		}
+		centerPureRefImport(importedElements, target);
 		automate.style.fontSize = originalFontSize;
 		automate.style.fontFamily = originalFontFamily;
 		if (getExcalidrawFileForLeaf(leaf)?.path !== boardFile.path || !getExcalidrawApi(leaf)) {
@@ -295,6 +343,12 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 		}
 		commitAttempted = true;
 		if (!await automate.addElementsToView(false, true, true)) throw new Error("Excalidraw did not accept the imported elements");
+		batchElementIds.push(...importedIds);
+		// Select only committed imports, including earlier files from this drop.
+		// The native selection API also activates the selection tool.
+		automate.selectElementsInView(batchElementIds);
+		const unflattened = placements.filter((placement) => placement.unflattened).length;
+		if (unflattened) new Notice(`${unflattened} imported file placement(s) could not be rendered with their PureRef crop/transform. Their original files were imported as embeds instead.`, 10000);
 		return boardFile.path;
 	} catch (error) {
 		// Once Excalidraw starts its commit, a failed response does not prove the
@@ -312,10 +366,11 @@ async function importScene(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf,
 
 export async function importPureRefFile(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf, owner: Window): Promise<void> {
 	try {
+		const target = importViewCenter(leaf);
 		const file = await pickPureRefFileForDomWindow(owner);
 		if (!file) return;
 		new Notice("Importing PureRef scene…");
-		const board = await importScene(plugin, leaf, file, await readExternalFile(file));
+		const board = await importScene(plugin, leaf, file, await readExternalFile(file), target);
 		new Notice(`Imported PureRef scene into ${board}`);
 	} catch (error) {
 		console.error("[Excalidraw PureRef] import failed", error);
@@ -336,12 +391,17 @@ export function promptPureRefDrop(
 	const pointed = target?.ownerDocument?.elementFromPoint(event.clientX, event.clientY);
 	if (!leaf || !container || !(target && container.contains(target)) && !(pointed && container.contains(pointed))) return false;
 	if (!getExcalidrawFileForLeaf(leaf) || !getExcalidrawApi(leaf)) return false;
+	// Capture scene coordinates before the choice prompt or async decoding can
+	// move the pointer/camera. The same leaf transform handles main and Popout drops.
+	const dropPoint = clientToSceneCoords(leaf, event.clientX, event.clientY);
+	if (!dropPoint) return false;
 
 	const importDroppedFiles = async (): Promise<void> => {
+		const batchElementIds: string[] = [];
 		for (const file of files) {
 			try {
 				new Notice(`Importing ${file.name}…`);
-				const board = await importScene(plugin, leaf, file.name, new Uint8Array(await file.arrayBuffer()));
+				const board = await importScene(plugin, leaf, file.name, new Uint8Array(await file.arrayBuffer()), dropPoint, batchElementIds);
 				new Notice(`Imported ${file.name} into ${board}`);
 			} catch (error) {
 				console.error("[Excalidraw PureRef] dropped file import failed", error);
