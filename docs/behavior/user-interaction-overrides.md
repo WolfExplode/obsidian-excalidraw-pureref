@@ -125,6 +125,10 @@ setting globally, the normal Board view is affected for that interval too.
   import writes can restore the original placement. Animated-image conversion
   saves a deletion marker for each source image so those later writes cannot
   bring back the original beside its packed embeddable.
+- Dropped or pasted media is selected automatically after its import finishes,
+  in the normal Board view and editable Popouts. A batch selects all its newly
+  imported media together, including animated-image replacements, after packing
+  and Board saves finish. A single-file import selects that one element.
 
 These integrations are designed to be additive where possible. The explicit
 gesture and shortcut overrides above are the intentional exceptions.

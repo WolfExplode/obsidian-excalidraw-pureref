@@ -1,7 +1,7 @@
 import type { WorkspaceLeaf } from "obsidian";
 import type ExcalidrawPureRefPlugin from "../main";
 import { localLinkpath } from "./board-render";
-import { getSceneElementFile, isExcalidrawLeaf, optimalPackElementsById, readSceneElements } from "./excalidraw-view";
+import { getSceneElementFile, isExcalidrawLeaf, optimalPackElementsById, readSceneElements, setSelection } from "./excalidraw-view";
 import { desanitizeAttachmentName } from "./popout-drop-bridge";
 import { attachPerLeafScanner, onEvent, type LeafScannerApi, type LeafScannerHandle } from "./leaf-scanner";
 import { importFileMatchesVaultPath } from "./import-file-match";
@@ -230,7 +230,17 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 				if (typeof view.save !== "function") throw new Error("Board save is unavailable after packing");
 				await view.save(true, true);
 			}
-			debug("packed", { source, ids: Array.from(transaction.mediaIds), packed });
+			await awaitNativeIdle(state);
+			if (!state.transactions.includes(transaction)) return;
+			// Native import writes can restore older selection state as well as
+			// positions. Select the final media (including converted embeddables)
+			// only after those writes and the packed Board save have finished.
+			const ids = (readSceneElements(leaf) ?? [])
+				.map((raw) => raw as MediaElement)
+				.filter((el) => isMedia(el) && !!el.id && transaction.mediaIds.has(el.id))
+				.map((el) => el.id!);
+			const selected = ids.length > 0 && setSelection(leaf, Object.fromEntries(ids.map((id) => [id, true])), {});
+			debug("packed", { source, ids: Array.from(transaction.mediaIds), packed, selected });
 		} catch (error) {
 			console.error("[Excalidraw PureRef] failed to finish a media import.", error);
 		} finally {
