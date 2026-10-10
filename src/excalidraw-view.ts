@@ -61,6 +61,8 @@ interface ExcalidrawViewState extends ExcalidrawViewport {
  */
 /** The Excalidraw element fields we read for bounding-box math and packing. */
 export interface SceneElement extends PackElement {
+	/** Image binary/EmbeddedFile registry key. */
+	fileId?: string | null;
 	version?: number;
 	versionNonce?: number;
 	updated?: number;

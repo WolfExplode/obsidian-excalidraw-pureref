@@ -11,6 +11,7 @@ import { attachOpacityKeydown, type OpacityKeydownOptions } from "./opacity-keys
 import { attachPackKeydown } from "./pack-keys";
 import { attachTransformKeydown } from "./transform-keys";
 import { attachZOrderKeydown } from "./zorder-keys";
+import { attachShowInExplorer } from "./show-in-explorer";
 
 export { isEditableTarget } from "./editable-target";
 
@@ -44,6 +45,7 @@ export function attachBoardGestures(win: Window, app: App, options: BoardGesture
 		attachTransformKeydown(win, app, hotkeys),
 		attachImageNormalize(win, app, hotkeys),
 		attachDuplicateFinder(win, app, hotkeys),
+		attachShowInExplorer(win, app),
 		attachContextMenuTrim(win, app),
 	];
 	return () => {

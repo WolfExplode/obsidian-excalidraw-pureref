@@ -1,7 +1,8 @@
-import { Notice, type App, type TFile, type WorkspaceLeaf } from "obsidian";
+import { Notice, requestUrl, type App, type TFile, type WorkspaceLeaf } from "obsidian";
 import { isExcalidrawLeaf } from "./excalidraw-view";
 import { localLinkpath } from "./board-render";
 import { pickDirectoryForDomWindow } from "./electron";
+import { decodeImageDataURL, externalImageExportName, resolveImageExportSource, type ExportImageRecord } from "./media-export-source";
 
 /**
  * **Ctrl+Shift+E**: exports every selected image/video/embed to a folder the
@@ -14,6 +15,8 @@ import { pickDirectoryForDomWindow } from "./electron";
  * — including one this plugin's viewport-crop feature already materialized
  * into its own generated image (see crop-orchestrator.ts) — is just copied
  * byte-for-byte, since the vault file already *is* the cropped result.
+ * Externally linked images use Excalidraw's loaded image bytes when available,
+ * otherwise read the external file or download the HTTP(S) source.
  * Videos and other local embeds have no crop concept, so they're always
  * copied as-is.
  *
@@ -67,10 +70,7 @@ interface ExportApi {
 	getFiles(): Record<string, { dataURL?: string } | undefined>;
 }
 
-interface EmbeddedFileLike {
-	getImage?(isDark: boolean): string;
-	file?: TFile | null;
-}
+type EmbeddedFileLike = ExportImageRecord<TFile>;
 
 interface ExcalidrawDataLike {
 	getFile?(fileId: string): EmbeddedFileLike | undefined;
@@ -96,7 +96,8 @@ function getExportApi(leaf: WorkspaceLeaf): ExportApi | null {
 /** A cropped image is rendered to a fresh PNG; everything else is a raw byte copy. */
 type ExportItem =
 	| { kind: "crop"; sourceFile: TFile; crop: ImageCropLike; flipX: boolean; flipY: boolean; dataURL: string }
-	| { kind: "copy"; sourceFile: TFile };
+	| { kind: "copy"; sourceFile: TFile }
+	| { kind: "external"; fileId: string; url?: string; dataURL?: string; crop?: ImageCropLike; flipX: boolean; flipY: boolean };
 
 function collectSelectedItems(app: App, leaf: WorkspaceLeaf): ExportItem[] {
 	const api = getExportApi(leaf);
@@ -128,16 +129,25 @@ function collectSelectedItems(app: App, leaf: WorkspaceLeaf): ExportItem[] {
 		if (!el.id || el.isDeleted || !selectedIds[el.id]) continue;
 
 		if (el.type === "image" && el.fileId) {
-			const sourceFile = view.excalidrawData?.getFile?.(el.fileId)?.file ?? null;
-			if (!sourceFile) continue;
+			const source = resolveImageExportSource(view.excalidrawData?.getFile?.(el.fileId), files[el.fileId]?.dataURL);
+			if (!source) continue;
 			const flipX = el.scale?.[0] === -1;
 			const flipY = el.scale?.[1] === -1;
+			if (source.kind === "external") {
+				const crop = el.crop && !isTrivialCrop(el.crop) ? el.crop : undefined;
+				const key = source.url ?? el.fileId;
+				pushOnce(crop
+					? `crop:${key}:${crop.x.toFixed(1)},${crop.y.toFixed(1)},${crop.width.toFixed(1)},${crop.height.toFixed(1)}:${flipX}:${flipY}`
+					: `copy:${key}`,
+					{ kind: "external", fileId: el.fileId, url: source.url, dataURL: source.dataURL, crop, flipX, flipY });
+				continue;
+			}
+			const sourceFile = source.file;
 			// A crop that shows the whole source with no flip isn't really a crop —
 			// collapse it onto the plain-copy path so it both dedupes against an
 			// uncropped duplicate and never synthesizes pixels needlessly.
 			if (el.crop && !isTrivialCrop(el.crop)) {
-				const dataURL =
-					files[el.fileId]?.dataURL ?? view.excalidrawData?.getFile?.(el.fileId)?.getImage?.(false);
+				const dataURL = source.dataURL;
 				if (!dataURL) continue; // bytes not resident; skip rather than export a blank crop
 				const c = el.crop;
 				pushOnce(
@@ -212,7 +222,7 @@ async function renderCroppedPng(
 
 interface NodeFs {
 	existsSync(path: string): boolean;
-	promises: { writeFile(path: string, data: Uint8Array): Promise<void> };
+	promises: { writeFile(path: string, data: Uint8Array): Promise<void>; readFile(path: URL): Promise<Uint8Array> };
 }
 interface NodePath {
 	join(...parts: string[]): string;
@@ -243,6 +253,19 @@ function uniqueDestPath(fs: NodeFs, path: NodePath, dir: string, fileName: strin
 		candidate = path.join(dir, `${stem}-${suffix}${ext}`);
 	}
 	return candidate;
+}
+
+async function readExternalImage(item: Extract<ExportItem, { kind: "external" }>, fs: NodeFs): Promise<{ bytes: Uint8Array; mimeType: string }> {
+	// Use the loaded pixels first: export remains possible when the original URL is offline.
+	if (item.dataURL?.startsWith("data:")) return decodeImageDataURL(item.dataURL);
+	if (item.url?.startsWith("file://")) {
+		return { bytes: new Uint8Array(await fs.promises.readFile(new URL(item.url))), mimeType: "" };
+	}
+	const url = item.url ?? item.dataURL;
+	if (!url || !/^https?:\/\//i.test(url)) throw new Error("External image has no readable source");
+	const response = await requestUrl({ url });
+	const mimeType = Object.entries(response.headers).find(([key]) => key.toLowerCase() === "content-type")?.[1] ?? "";
+	return { bytes: new Uint8Array(response.arrayBuffer), mimeType };
 }
 
 /**
@@ -278,10 +301,24 @@ export async function exportSelectedMedia(app: App, leaf: WorkspaceLeaf): Promis
 				const data = await app.vault.readBinary(item.sourceFile);
 				const dest = uniqueDestPath(fs, path, dir, item.sourceFile.name);
 				await fs.promises.writeFile(dest, new Uint8Array(data));
-			} else {
+			} else if (item.kind === "crop") {
 				const data = await renderCroppedPng(win, item.dataURL, item.crop, item.flipX, item.flipY);
 				const dest = uniqueDestPath(fs, path, dir, `${item.sourceFile.basename}.png`);
 				await fs.promises.writeFile(dest, new Uint8Array(data));
+			} else {
+				const source = await readExternalImage(item, fs);
+				let name = externalImageExportName(item.url, source.mimeType, item.fileId);
+				let bytes = source.bytes;
+				if (item.crop) {
+					const blobUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer], { type: source.mimeType }));
+					try {
+						bytes = new Uint8Array(await renderCroppedPng(win, blobUrl, item.crop, item.flipX, item.flipY));
+					} finally {
+						URL.revokeObjectURL(blobUrl);
+					}
+					name = `${path.basename(name, path.extname(name))}.png`;
+				}
+				await fs.promises.writeFile(uniqueDestPath(fs, path, dir, name), bytes);
 			}
 			exported++;
 		} catch (error) {

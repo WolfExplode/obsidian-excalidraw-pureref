@@ -41,10 +41,15 @@ to a normal move so it cannot duplicate a newly clicked element.
 | **Ctrl+Alt+Up** / **Down** with two or more images selected | Resizes the selected images, centered in place, to their average displayed area / average native-image scale. | Normal view and editable Popout. Also available from the canvas context menu: **Normalize → Size / Scale**. |
 | **F11** | Opens or closes the PureRef Popout for the active Board. | An Excalidraw Board. |
 | **F10** | Switches an existing editable Popout and its read-only transparent reference mode. | Only when one of those modes exists. |
-| **Ctrl+Shift+E** | Exports every selected image/video/embed to a folder chosen via the native OS dialog. A natively cropped image is rendered to a fresh PNG holding only its visible crop (flips included); an uncropped image or any other local media file is copied byte-for-byte. | Normal view and editable Popout, when a Board is the active leaf. |
+| **Ctrl+Shift+E** | Exports every selected image/video/embed to a folder chosen via the native OS dialog. A natively cropped image is rendered to a fresh PNG holding only its visible crop (flips included); an uncropped vault image or any other local media file is copied byte-for-byte. Externally linked images are also exported, using loaded image bytes when available or reading the external file/HTTP(S) source otherwise. Their native crops follow the same PNG rule. | Normal view and editable Popout, when a Board is the active leaf. |
 
 ## Canvas context menu
 
+- **Show in Explorer is added** when exactly one image with a local vault file
+  is selected. It opens Windows File Explorer with that file selected, in the
+  normal Board view and editable Popouts. A custom crop reveals its generated
+  image file; a native crop reveals the underlying source image. Remote images
+  and images without a local file do not offer this action.
 - **Cut / Copy / Paste are removed** from Excalidraw's native right-click
   context menu. There, they operate on Excalidraw's own element clipboard
   (selected elements only), not the OS clipboard, which read as a bug to

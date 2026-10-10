@@ -71,6 +71,23 @@ type ElectronRequire = (moduleId: string) => unknown;
 
 const MODULE_IDS = ["@electron/remote", "electron"] as const;
 
+/** Reveal a local file with Electron's native shell API, without a shell command. */
+export function showFileInExplorer(path: string): boolean {
+	const req = getElectronRequire();
+	if (!req) return false;
+	for (const moduleId of ["electron", "@electron/remote"]) {
+		try {
+			const module = req(moduleId) as { shell?: { showItemInFolder(path: string): void } };
+			if (!module.shell?.showItemInFolder) continue;
+			module.shell.showItemInFolder(path);
+			return true;
+		} catch (error) {
+			console.warn("[Excalidraw PureRef] Could not reveal file in Explorer:", error);
+		}
+	}
+	return false;
+}
+
 function getElectronRequire(): ElectronRequire | null {
 	const globalWindow = window as Window & { require?: ElectronRequire };
 	return globalWindow.require ?? null;
