@@ -58,6 +58,13 @@ The 2.x export contract is in [ADR 0014](adr/0014-export-board-to-pureref-2x.md)
 
 ## Reading investigations
 
+The superseded first image LOD checkpoint and its renderer seam are recorded
+in [ADR 0015](adr/0015-experimental-image-display-proxies.md).
+The earlier image render-cache trial is recorded in
+[ADR 0016](adr/0016-experimental-image-render-cache.md).
+The accepted smooth-image-navigation feature and compatible renderer requirement
+are recorded in [ADR 0017](adr/0017-smooth-image-navigation.md).
+
 Investigation documents preserve observed evidence and paths that were rejected,
 paused, or still uncertain. They are useful for avoiding repeated work, but they
 do not define the product. An ADR or behavior/integration guide is the source of

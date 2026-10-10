@@ -77,6 +77,21 @@ describe("isFrontOfEmbedEligible", () => {
 });
 
 describe("planFrontOfEmbedCandidates", () => {
+	it("calculates rotated bounds once per element per scan, and refreshes after movement", () => {
+		let angleReads = 0;
+		const elements = Array.from({ length: 40 }, (_, index) => el({
+			id: `embed-${index}`, type: "embeddable", x: index * 200,
+		}));
+		const image = el({ id: "image", type: "image", x: 10000 });
+		for (const element of [...elements, image]) {
+			Object.defineProperty(element, "angle", { get() { angleReads++; return Math.PI / 4; } });
+		}
+		assert.deepEqual(ids([...elements, image]), []);
+		assert.equal(angleReads, 41);
+		image.x = 0;
+		assert.deepEqual(ids([...elements, image]), ["image"]);
+		assert.equal(angleReads, 82);
+	});
 	it("returns empty when there are no embeddables", () => {
 		assert.deepEqual(ids([el({ id: "a" }), el({ id: "b", x: 10, y: 10 })]), []);
 	});

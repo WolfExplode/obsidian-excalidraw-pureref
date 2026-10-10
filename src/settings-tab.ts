@@ -32,6 +32,18 @@ export class ExcalidrawPureRefSettingTab extends PluginSettingTab {
 
 		return [
 			{
+				name: "Smooth image navigation",
+				desc: "Keep small JPEG previews ready while sharper detail loads in the background. Requires the compatible Excalidraw renderer build; the public release uses normal rendering.",
+				aliases: ["image performance", "LOD", "preview cache", "pan", "zoom"],
+				render: (setting: Setting) => setting.addToggle(toggle => toggle
+					.setValue(this.plugin.imageNavigation.getEnabled())
+					.onChange(async enabled => {
+						try { await this.plugin.imageNavigation.setEnabled(enabled); }
+						catch (error) { new Notice(`Could not save image navigation preference: ${String(error)}`); }
+						this.update();
+					})),
+			},
+			{
 				type: "group",
 				heading: "Hotkeys",
 				items: [

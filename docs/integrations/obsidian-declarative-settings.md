@@ -10,6 +10,10 @@ That still gives Obsidian the setting names, descriptions, and aliases it needs
 to index them in Settings search. A `render` callback does not save data
 automatically; the hotkey controls must continue to persist through
 `HotkeyStore`, while geometry is persisted by `GeometryStore`.
+The **Smooth image navigation** toggle persists through `ImageNavigationSettings`
+and the same shared `PluginDataWriter`, so it cannot overwrite geometry or
+hotkey changes. It defaults on, but requires the compatible renderer described
+in [ADR 0017](../adr/0017-smooth-image-navigation.md).
 
 Do not add a `display()` implementation as a fallback unless the plugin's
 minimum Obsidian version is deliberately lowered below 1.13.0. On 1.13.0+ a

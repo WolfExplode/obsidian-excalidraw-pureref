@@ -9,6 +9,18 @@ See the complete [interaction reference](docs/behavior/user-interaction-override
 
 ## Features
 
+### **Smooth image navigation**
+
+Keep small JPEG previews ready across the Board while sharper detail loads in
+background workers. This improves the zoom-in, zoom-out, pan workflow on large
+Boards and preserves original-resolution saves and exports. It is enabled by
+default and can be disabled in Plugin settings.
+
+**Requires the compatible Excalidraw renderer build.** The unmodified public
+Obsidian Excalidraw release uses its normal renderer. See the
+[renderer build handoff](docs/patches/README.md) and
+[feature scope](docs/adr/0017-smooth-image-navigation.md).
+
 ### **Popout window** 
 - Pop the active Board out into a chrome-free,
   always-on-top OS window (**F11**) that can be dragged with a right-button

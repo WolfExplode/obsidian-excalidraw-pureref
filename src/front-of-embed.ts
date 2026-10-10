@@ -17,7 +17,7 @@
  * front-of-embed-view.ts does the API glue (compositing, font metrics, the blit).
  */
 
-import { elementAABB, geometryOffset, type PackElement } from "./pack-elements";
+import { elementAABB, geometryOffset, type PackElement, type Rect } from "./pack-elements";
 
 /** The minimal element shape the front-of-embed planner and mask builder read. */
 export interface FrontOfEmbedElement extends PackElement {
@@ -59,9 +59,7 @@ const EMBEDDABLE_TYPES = new Set(["embeddable", "iframe"]);
 
 const EPS = 1e-6;
 
-function overlaps(a: FrontOfEmbedElement, b: FrontOfEmbedElement): boolean {
-	const ra = elementAABB(a);
-	const rb = elementAABB(b);
+function overlaps(ra: Rect, rb: Rect): boolean {
 	return ra.minX < rb.maxX - EPS && ra.maxX > rb.minX + EPS && ra.minY < rb.maxY - EPS && ra.maxY > rb.minY + EPS;
 }
 
@@ -151,17 +149,20 @@ export function planFrontOfEmbedCandidates(
 
 	// Pass 1: which unbound elements sit in front of an embeddable they overlap.
 	const qualified = new Set<string>();
-	const embeddablesSoFar: FrontOfEmbedElement[] = [];
+	// Bounds belong to this scan, so camera-only changes do not multiply trig and
+	// point-bound calculations by the number of potential overlapping embeds.
+	const embeddablesSoFar: Rect[] = [];
 	for (const element of allElements) {
 		if (isFrontOfEmbedEmbeddable(element)) {
-			embeddablesSoFar.push(element);
+			embeddablesSoFar.push(elementAABB(element));
 			continue;
 		}
 		// Labels are settled in pass 2; a container's own verdict is the answer for both.
 		if (element.containerId) continue;
 		if (!isFrontOfEmbedEligible(element)) continue;
 		if (embeddablesSoFar.length === 0) continue;
-		if (embeddablesSoFar.some((embeddable) => overlaps(element, embeddable))) qualified.add(element.id);
+		const bounds = elementAABB(element);
+		if (embeddablesSoFar.some((embeddable) => overlaps(bounds, embeddable))) qualified.add(element.id);
 	}
 
 	// Pass 2: back to scene order, folding in each qualifying container's label.

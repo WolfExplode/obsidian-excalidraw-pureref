@@ -15,6 +15,8 @@ import { attachMediaAutoPack } from "src/media-auto-pack";
 import { attachGifControls } from "src/gif-controls";
 import { attachSelectionStatus } from "src/selection-status";
 import { attachBoardSearch } from "src/board-search";
+import { attachImageNavigation } from "src/image-navigation";
+import { ImageNavigationSettings } from "src/image-navigation-settings";
 import { attachFrontOfEmbedRendering } from "src/front-of-embed-view";
 import { installCropDebugHook } from "src/crop-drag";
 import { attachRotationResetHotkey } from "src/rotation-reset-hotkey";
@@ -25,7 +27,7 @@ import { PluginDataWriter } from "src/plugin-data-writer";
 
 /**
  * The only persisted state is per-Board window geometry (GeometryStore) and
- * user hotkey overrides (HotkeyStore, src/hotkey-store.ts). Every plugin
+ * user hotkey overrides (HotkeyStore), and image-navigation preferences. Every plugin
  * hotkey — including the ones backed by a real Obsidian command — is
  * configurable from the plugin's own Settings tab (settings-tab.ts), which is
  * the single place to see and rebind all of them; syncObsidianHotkeys keeps
@@ -36,7 +38,9 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 	geometry!: GeometryStore;
 	popouts!: PopoutManager;
 	hotkeys!: HotkeyStore;
+	imageNavigation!: ImageNavigationSettings;
 	private diagnosticEvents: Array<{ timestamp: number; type: string; data: unknown }> = [];
+	imageNavigationDiagnostics: () => unknown = () => ({ enabled: false, status: "inactive" });
 
 	recordDiagnostic(type: string, data: unknown = {}): void {
 		this.diagnosticEvents.push({ timestamp: Date.now(), type, data });
@@ -48,6 +52,7 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 			pluginId: this.manifest.id,
 			loaded: true,
 			popouts: this.popouts?.getLifecycleDiagnostics() ?? null,
+			imageNavigation: this.imageNavigationDiagnostics(),
 			events: this.diagnosticEvents.slice(),
 		};
 	}
@@ -62,6 +67,8 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 
 		this.hotkeys = new HotkeyStore(dataWriter);
 		await this.hotkeys.load();
+		this.imageNavigation = new ImageNavigationSettings(dataWriter);
+		await this.imageNavigation.load();
 
 		this.popouts = new PopoutManager(this);
 
@@ -92,6 +99,7 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 		this.register(attachGifControls(this));
 		this.register(attachSelectionStatus(this));
 		this.register(attachBoardSearch(this));
+		this.register(attachImageNavigation(this));
 		this.register(attachImportConflictBatch(window.document));
 		this.register(attachPopoutDropBridge(window.document, {
 			alwaysBridge: false,

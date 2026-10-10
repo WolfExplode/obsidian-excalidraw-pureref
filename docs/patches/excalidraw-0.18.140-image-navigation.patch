@@ -1,0 +1,825 @@
+diff --git a/packages/element/src/imageRenderSource.ts b/packages/element/src/imageRenderSource.ts
+new file mode 100644
+index 0000000..7641386
+--- /dev/null
++++ b/packages/element/src/imageRenderSource.ts
+@@ -0,0 +1,38 @@
++/**
++ * zsviczian -- Display pixels for smooth navigation on large reference Boards.
++ * Author: WolfExplode. The host owns bitmap generation/lifetime; this seam belongs
++ * in the renderer because replacing BinaryFiles would also affect saves/exports.
++ * Original image dimensions remain authoritative for crop and editing geometry.
++ */
++/** zsviczian -- null means loading; undefined deliberately selects the native source. */
++export type ImageRenderSourceProvider = (request: {
++  fileId: string;
++  pixelWidth: number;
++  pixelHeight: number;
++  naturalWidth: number;
++  naturalHeight: number;
++}) => ImageBitmap | null | undefined;
++
++export const getImageRenderSource = (
++  original: HTMLImageElement,
++  proxy: ImageBitmap | null | undefined,
++  isExporting: boolean,
++) => {
++  if (!isExporting && proxy === null) {
++    return { image: null, scaleX: 1, scaleY: 1 };
++  }
++  if (
++    isExporting ||
++    !proxy?.width ||
++    !proxy.height ||
++    !original.naturalWidth ||
++    !original.naturalHeight
++  ) {
++    return { image: original, scaleX: 1, scaleY: 1 };
++  }
++  return {
++    image: proxy,
++    scaleX: proxy.width / original.naturalWidth,
++    scaleY: proxy.height / original.naturalHeight,
++  };
++};
+diff --git a/packages/element/src/imageZoomCache.ts b/packages/element/src/imageZoomCache.ts
+new file mode 100644
+index 0000000..b53f3b5
+--- /dev/null
++++ b/packages/element/src/imageZoomCache.ts
+@@ -0,0 +1,142 @@
++/**
++ * zsviczian -- Reuse image render canvases across zoom bands on dense Boards.
++ * Author: WolfExplode. See the host's image-lod-attribution-trial investigation.
++ * Source proxies cannot prevent exact-zoom render-cache invalidation.
++ * The budget bounds retained references, not all browser/GPU memory: upstream
++ * may separately hold its current canvas after an LRU entry is evicted.
++ */
++interface CanvasEntry {
++  canvas: { width: number; height: number };
++}
++interface RecordEntry<T> {
++  signature: readonly unknown[];
++  selected: T | undefined;
++  tiers: Map<number, Retained<T>>;
++}
++interface Retained<T> {
++  record: RecordEntry<T>;
++  tier: number;
++  value: T;
++  bytes: number;
++}
++
++/** Round up to sqrt(2) bands; retained pixels meet the requested detail. */
++export const imageCacheZoom = (zoom: number): number =>
++  zoom > 0 && Number.isFinite(zoom)
++    ? 2 ** (Math.ceil(Math.log2(zoom) * 2 - 1e-10) / 2)
++    : zoom;
++
++export class ImageZoomCache<T extends CanvasEntry> {
++  private records = new WeakMap<object, RecordEntry<T>>();
++  private retained = new Set<Retained<T>>();
++  private bytes = 0;
++  private hits = 0;
++  private generated = 0;
++  private evictions = 0;
++  // A dense Board needs multiple bands per image. Keep the count guard well
++  // above one Board's image count; pixel bytes remain the primary budget.
++  constructor(private budget = 128 * 1024 * 1024, private maxEntries = 4096) {}
++
++  /** Missing/replaced upstream entries invalidate tiers instead of reviving stale pixels. */
++  get(
++    element: object,
++    tier: number,
++    previous: T | undefined,
++    signature: readonly unknown[],
++  ): { value?: T; invalidated: boolean } {
++    let record = this.records.get(element);
++    const invalidated =
++      !record ||
++      !previous ||
++      record.selected !== previous ||
++      record.signature.length !== signature.length ||
++      record.signature.some(
++        (value, index) => !Object.is(value, signature[index]),
++      );
++    if (invalidated || !record) {
++      if (record) {
++        for (const entry of record.tiers.values()) {
++          this.remove(entry);
++        }
++      }
++      record = { signature, selected: previous, tiers: new Map() };
++      this.records.set(element, record);
++    }
++    const entry = record.tiers.get(tier);
++    if (!entry) {
++      return { invalidated };
++    }
++    this.hits++;
++    this.retained.delete(entry);
++    this.retained.add(entry);
++    record.selected = entry.value;
++    return { value: entry.value, invalidated };
++  }
++
++  put(element: object, tier: number, value: T): void {
++    this.generated++;
++    const record = this.records.get(element);
++    if (!record) {
++      return;
++    }
++    record.selected = value;
++    const existing = record.tiers.get(tier);
++    if (existing) {
++      this.remove(existing);
++    }
++    const bytes = value.canvas.width * value.canvas.height * 4;
++    if (!(bytes > 0) || bytes > this.budget) {
++      return;
++    }
++    while (
++      this.retained.size &&
++      (this.bytes + bytes > this.budget ||
++        this.retained.size >= this.maxEntries)
++    ) {
++      this.evictions++;
++      this.remove(this.retained.values().next().value!);
++    }
++    const entry = { record, tier, value, bytes };
++    record.tiers.set(tier, entry);
++    this.retained.add(entry);
++    this.bytes += bytes;
++  }
++
++  clear(): void {
++    this.records = new WeakMap();
++    this.retained.clear();
++    this.bytes = 0;
++    this.hits = this.generated = this.evictions = 0;
++  }
++  stats() {
++    return {
++      entries: this.retained.size,
++      bytes: this.bytes,
++      hits: this.hits,
++      generated: this.generated,
++      evictions: this.evictions,
++    };
++  }
++  private remove(entry: Retained<T>): void {
++    entry.record.tiers.delete(entry.tier);
++    this.retained.delete(entry);
++    this.bytes -= entry.bytes;
++  }
++}
++
++// Each editor's imageCache owns its tier cache; Boards and Popouts never share it.
++const caches = new WeakMap<object, ImageZoomCache<CanvasEntry>>();
++export const getImageZoomCache = <T extends CanvasEntry>(
++  owner: object,
++): ImageZoomCache<T> => {
++  let cache = caches.get(owner);
++  if (!cache) {
++    cache = new ImageZoomCache();
++    caches.set(owner, cache);
++  }
++  return cache as ImageZoomCache<T>;
++};
++export const clearImageZoomCache = (owner: object): void => {
++  caches.get(owner)?.clear();
++  caches.delete(owner);
++};
+diff --git a/packages/element/src/renderElement.ts b/packages/element/src/renderElement.ts
+index 520e0e2..3f8c3f9 100644
+--- a/packages/element/src/renderElement.ts
++++ b/packages/element/src/renderElement.ts
+@@ -74,6 +74,8 @@ import { getContainingFrame } from "./frame";
+ import { getCornerRadius } from "./utils";
+ 
+ import { ShapeCache } from "./shape";
++import { getImageRenderSource } from "./imageRenderSource"; // zsviczian -- display-only image proxies
++import { getImageZoomCache, imageCacheZoom } from "./imageZoomCache"; // zsviczian -- bounded image canvas tiers
+ import {
+   getStickyNoteFooter,
+   getStickyNotePathCommands,
+@@ -640,12 +642,34 @@ const drawElementOnCanvas = (
+             context.filter = DARK_THEME_FILTER;
+           }
+ 
+-          context.drawImage(
++          // zsviczian START -- proxy pixels never replace original crop geometry
++          const display = getImageRenderSource(
+             img,
+-            x,
+-            y,
+-            width,
+-            height,
++            renderConfig.preparedImageSource,
++            renderConfig.isExporting,
++          );
++          if (!display.image) {
++            // zsviczian -- no original-image command while the worker prepares pixels
++            context.fillStyle =
++              renderConfig.theme === THEME.DARK ? "#2E2E2E" : "#E7E7E7";
++            context.fillRect(0, 0, element.width, element.height);
++            context.restore();
++            break;
++          }
++          // zsviczian END
++          context.drawImage(
++            // zsviczian START -- proxy pixels never replace original crop geometry
++            // img,
++            // x,
++            // y,
++            // width,
++            // height,
++            display.image,
++            x * display.scaleX,
++            y * display.scaleY,
++            width * display.scaleX,
++            height * display.scaleY,
++            // zsviczian END
+             0 /* hardcoded for the selection box*/,
+             0,
+             element.width,
+@@ -728,10 +752,76 @@ const generateElementWithCanvas = (
+ ) => {
+   const zoom: Zoom = renderConfig ? appState.zoom : DEFAULT_ZOOM;
+   const prevElementWithCanvas = elementWithCanvasCache.get(element);
++  // zsviczian START -- reuse finished image canvases across stable zoom bands
++  const imageTierCache = isImageElement(element)
++    ? getImageZoomCache<ExcalidrawElementWithCanvas>(renderConfig.imageCache)
++    : null;
++  const cacheZoom = imageTierCache
++    ? ({ value: imageCacheZoom(zoom.value) } as Zoom)
++    : zoom;
++  // zsviczian START -- consult readiness before queuing any source image draw
++  const original =
++    isImageElement(element) && element.fileId
++      ? renderConfig.imageCache.get(element.fileId)?.image
++      : undefined;
++  const prepared =
++    isImageElement(element) &&
++    element.fileId &&
++    original &&
++    !(original instanceof Promise)
++      ? renderConfig.imageRenderSourceProvider?.({
++          fileId: element.fileId,
++          pixelWidth:
++            element.width *
++            cacheZoom.value *
++            (original.ownerDocument.defaultView?.devicePixelRatio || 1) *
++            (element.crop ? original.naturalWidth / element.crop.width : 1),
++          pixelHeight:
++            element.height *
++            cacheZoom.value *
++            (original.ownerDocument.defaultView?.devicePixelRatio || 1) *
++            (element.crop ? original.naturalHeight / element.crop.height : 1),
++          naturalWidth: original.naturalWidth,
++          naturalHeight: original.naturalHeight,
++        })
++      : undefined;
++  const imageConfig =
++    prepared !== undefined
++      ? { ...renderConfig, preparedImageSource: prepared }
++      : renderConfig;
++  const allowImageTierUpdate =
++    !appState?.shouldCacheIgnoreZoom ||
++    !!renderConfig.imageRenderSourceProvider;
++  // zsviczian END
++  const retainedImage =
++    imageTierCache && allowImageTierUpdate
++      ? imageTierCache.get(element, cacheZoom.value, prevElementWithCanvas, [
++          element.version,
++          element.width,
++          element.height,
++          appState.theme,
++          isImageElement(element) ? element.crop : null,
++          getContainingFrame(element, elementsMap)?.opacity || 100,
++          isImageElement(element) && element.fileId
++            ? renderConfig.imageCache.get(element.fileId)?.image
++            : null,
++          prepared,
++        ])
++      : undefined;
++  if (retainedImage?.value) {
++    elementWithCanvasCache.set(element, retainedImage.value);
++    return retainedImage.value;
++  }
++  // zsviczian END
+   const shouldRegenerateBecauseZoom =
+     prevElementWithCanvas &&
+-    prevElementWithCanvas.zoomValue !== zoom.value &&
+-    !appState?.shouldCacheIgnoreZoom;
++    // zsviczian START -- image bands and pending/ready updates during gestures
++    // prevElementWithCanvas.zoomValue !== zoom.value && // zsviczian -- image bands
++    // !appState?.shouldCacheIgnoreZoom;
++    (retainedImage?.invalidated ||
++      prevElementWithCanvas.zoomValue !== cacheZoom.value) && // zsviczian -- image bands and pixel invalidation
++    (imageTierCache ? allowImageTierUpdate : !appState?.shouldCacheIgnoreZoom); // zsviczian -- pending/ready pixels also update during gestures
++  // zsviczian END
+   const imageCrop = isImageElement(element) ? element.crop : null;
+ 
+   const containingFrameOpacity =
+@@ -747,8 +837,10 @@ const generateElementWithCanvas = (
+     const elementWithCanvas = generateElementCanvas(
+       element,
+       elementsMap,
+-      zoom,
+-      renderConfig,
++      // zoom, // zsviczian -- generate image canvases at the selected band
++      cacheZoom, // zsviczian -- generate image canvases at the selected band
++      // renderConfig, // zsviczian -- upstream configuration remains the native fallback
++      imageConfig, // zsviczian -- prepared pixels or a loading preview
+       appState,
+     );
+ 
+@@ -757,6 +849,7 @@ const generateElementWithCanvas = (
+     }
+ 
+     elementWithCanvasCache.set(element, elementWithCanvas);
++    imageTierCache?.put(element, cacheZoom.value, elementWithCanvas); // zsviczian -- retained tiers
+ 
+     return elementWithCanvas;
+   }
+@@ -1267,6 +1360,14 @@ const drawElement = (
+           //
+           context.imageSmoothingEnabled = false;
+         }
++        // zsviczian START -- a retained image tier is resampled at nearby zooms
++        if (
++          isImageElement(element) &&
++          elementWithCanvas.scale !== appState.zoom.value
++        ) {
++          context.imageSmoothingEnabled = true;
++        }
++        // zsviczian END
+ 
+         if (
+           element.id === appState.croppingElementId &&
+diff --git a/packages/element/tests/imageRenderSource.test.ts b/packages/element/tests/imageRenderSource.test.ts
+new file mode 100644
+index 0000000..b011194
+--- /dev/null
++++ b/packages/element/tests/imageRenderSource.test.ts
+@@ -0,0 +1,49 @@
++import { describe, expect, it } from "vitest";
++
++import { getImageRenderSource } from "../src/imageRenderSource";
++
++describe("display-only image source", () => {
++  const original = {
++    naturalWidth: 4000,
++    naturalHeight: 3000,
++  } as HTMLImageElement;
++  const proxy = { width: 320, height: 240 } as ImageBitmap;
++
++  it("maps original crop pixels to the smaller bitmap", () => {
++    const display = getImageRenderSource(original, proxy, false);
++    expect(display.image).toBe(proxy);
++    expect(1000 * display.scaleX).toBe(80);
++    expect(1500 * display.scaleY).toBe(120);
++  });
++
++  it("always uses originals for export", () => {
++    expect(getImageRenderSource(original, proxy, true)).toEqual({
++      image: original,
++      scaleX: 1,
++      scaleY: 1,
++    });
++  });
++
++  it("falls back to the original for absent or closed proxies", () => {
++    expect(getImageRenderSource(original, undefined, false).image).toBe(
++      original,
++    );
++    expect(
++      getImageRenderSource(
++        original,
++        { width: 0, height: 0 } as ImageBitmap,
++        false,
++      ).image,
++    ).toBe(original);
++  });
++
++  it("restores the crop aspect when the bounded proxy is square", () => {
++    const display = getImageRenderSource(
++      original,
++      { width: 320, height: 320 } as ImageBitmap,
++      false,
++    );
++    expect(1000 * display.scaleX).toBe(80);
++    expect(1500 * display.scaleY).toBe(160);
++  });
++});
+diff --git a/packages/element/tests/imageZoomCache.test.ts b/packages/element/tests/imageZoomCache.test.ts
+new file mode 100644
+index 0000000..e49cef2
+--- /dev/null
++++ b/packages/element/tests/imageZoomCache.test.ts
+@@ -0,0 +1,89 @@
++import { describe, expect, it } from "vitest";
++
++import { ImageZoomCache, imageCacheZoom } from "../src/imageZoomCache";
++
++const canvas = (side = 2) => ({ canvas: { width: side, height: side } });
++
++describe("image render zoom cache", () => {
++  it("retains more than one dense Board of small canvases under the byte budget", () => {
++    const cache = new ImageZoomCache();
++    for (let index = 0; index < 1200; index++) {
++      const element = {};
++      cache.get(element, 1, undefined, []);
++      cache.put(element, 1, canvas());
++    }
++    expect(cache.stats()).toMatchObject({ entries: 1200, evictions: 0 });
++  });
++  it("groups nearby zooms without generating less detail than requested", () => {
++    expect(imageCacheZoom(0.1)).toBe(imageCacheZoom(0.12));
++    expect(imageCacheZoom(1)).toBe(1);
++    for (const zoom of [0.03, 0.1, 0.7, 1, 1.01, 3.9, 10]) {
++      expect(imageCacheZoom(zoom)).toBeGreaterThanOrEqual(zoom);
++      expect(imageCacheZoom(zoom)).toBeLessThan(zoom * Math.SQRT2 + 1e-9);
++    }
++  });
++
++  it("reuses an earlier tier after zooming out and back in", () => {
++    const cache = new ImageZoomCache();
++    const element = {};
++    const low = canvas();
++    const high = canvas(4);
++    cache.get(element, 1, undefined, ["pixels"]);
++    cache.put(element, 1, low);
++    expect(cache.get(element, 2, low, ["pixels"]).value).toBeUndefined();
++    cache.put(element, 2, high);
++    expect(cache.get(element, 1, high, ["pixels"]).value).toBe(low);
++    expect(cache.get(element, 2, low, ["pixels"]).value).toBe(high);
++  });
++
++  it("does not revive pixels after upstream invalidation or changed render inputs", () => {
++    for (const previousMissing of [true, false]) {
++      const cache = new ImageZoomCache();
++      const element = {};
++      const image = canvas();
++      cache.get(element, 1, undefined, ["original", 1]);
++      cache.put(element, 1, image);
++      const result = cache.get(
++        element,
++        1,
++        previousMissing ? undefined : image,
++        previousMissing ? ["original", 1] : ["replacement", 2],
++      );
++      expect(result).toEqual({ invalidated: true });
++      expect(cache.stats().entries).toBe(0);
++    }
++  });
++
++  it("bounds retained bytes and evicts the least recently used tier", () => {
++    const cache = new ImageZoomCache(32);
++    const element = {};
++    const a = canvas();
++    const b = canvas();
++    const c = canvas();
++    cache.get(element, 1, undefined, []);
++    cache.put(element, 1, a);
++    cache.get(element, 2, a, []);
++    cache.put(element, 2, b);
++    cache.get(element, 1, b, []);
++    cache.get(element, 3, a, []);
++    cache.put(element, 3, c);
++    expect(cache.get(element, 2, c, []).value).toBeUndefined();
++    expect(cache.get(element, 1, c, []).value).toBe(a);
++    expect(cache.stats()).toMatchObject({
++      entries: 2,
++      bytes: 32,
++      evictions: 1,
++    });
++  });
++
++  it("does not retain an oversized canvas and clears deterministically", () => {
++    const cache = new ImageZoomCache(16, 1);
++    const element = {};
++    const image = canvas(3);
++    cache.get(element, 1, undefined, []);
++    cache.put(element, 1, image);
++    expect(cache.stats().bytes).toBe(0);
++    cache.clear();
++    expect(cache.get(element, 1, image, []).invalidated).toBe(true);
++  });
++});
+diff --git a/packages/element/tests/imageZoomRenderer.test.ts b/packages/element/tests/imageZoomRenderer.test.ts
+new file mode 100644
+index 0000000..70aa874
+--- /dev/null
++++ b/packages/element/tests/imageZoomRenderer.test.ts
+@@ -0,0 +1,172 @@
++/** zsviczian -- Author: WolfExplode. Exercise the real renderer cache/export branches. */
++import rough from "roughjs/bin/rough";
++import { describe, expect, it } from "vitest";
++import { getDefaultAppState } from "@excalidraw/excalidraw/appState";
++
++import type {
++  StaticCanvasRenderConfig,
++  RenderableElementsMap,
++} from "@excalidraw/excalidraw/scene/types";
++import type { StaticCanvasAppState, Zoom } from "@excalidraw/excalidraw/types";
++
++import { newImageElement } from "../src/newElement";
++import { elementWithCanvasCache, renderElement } from "../src/renderElement";
++import { getImageZoomCache } from "../src/imageZoomCache";
++
++import type { FileId } from "../src/types";
++
++import type { NonDeletedSceneElementsMap } from "../src/types";
++
++const setup = () => {
++  const element = newImageElement({
++    type: "image",
++    x: 0,
++    y: 0,
++    width: 100,
++    height: 80,
++    fileId: "original" as FileId,
++    status: "saved",
++  });
++  const image = document.createElement("img");
++  Object.defineProperties(image, {
++    naturalWidth: { value: 100 },
++    naturalHeight: { value: 80 },
++  });
++  const canvas = document.createElement("canvas");
++  const context = canvas.getContext("2d")!;
++  const elements = new Map([
++    [element.id, element],
++  ]) as unknown as RenderableElementsMap;
++  const config: StaticCanvasRenderConfig = {
++    imageCache: new Map([[element.fileId!, { image, mimeType: "image/png" }]]),
++    canvasBackgroundColor: "#fff",
++    renderGrid: false,
++    isExporting: false,
++    embedsValidationStatus: new Map(),
++    elementsPendingErasure: new Set(),
++    pendingFlowchartNodes: null,
++    theme: "light",
++  };
++  const draw = (zoom: number) =>
++    renderElement(
++      element,
++      elements,
++      elements as unknown as NonDeletedSceneElementsMap,
++      rough.canvas(canvas),
++      context,
++      config,
++      {
++        ...getDefaultAppState(),
++        zoom: { value: zoom } as Zoom,
++      } as unknown as StaticCanvasAppState,
++    );
++  return {
++    element,
++    image,
++    context,
++    config,
++    draw,
++    cache: getImageZoomCache(config.imageCache),
++  };
++};
++
++describe("image zoom cache renderer integration", () => {
++  it("does not queue an original draw while prepared pixels are pending, and exports bypass readiness", () => {
++    const { config, context, image, draw, element } = setup();
++    let calls = 0;
++    config.imageRenderSourceProvider = () => {
++      calls++;
++      return null;
++    };
++    draw(0.1);
++    const draws = (
++      elementWithCanvasCache.get(element)!.canvas.getContext("2d")!
++        .drawImage as unknown as { mock: { calls: unknown[][] } }
++    ).mock.calls;
++    expect(draws.some((args) => args[0] === image)).toBe(false);
++    expect(calls).toBe(1);
++    config.isExporting = true;
++    draw(1);
++    expect(calls).toBe(1);
++    expect(context.drawImage).toHaveBeenLastCalledWith(
++      image,
++      0,
++      0,
++      100,
++      80,
++      0,
++      0,
++      100,
++      80,
++    );
++  });
++  it("replaces loading pixels with ready pixels at the same zoom without drawing the original", () => {
++    const { config, image, draw, element } = setup();
++    const ready = document.createElement("canvas");
++    ready.width = 80;
++    ready.height = 40;
++    let pending = true;
++    config.imageRenderSourceProvider = () =>
++      pending ? null : (ready as unknown as ImageBitmap);
++    draw(0.1);
++    const loading = elementWithCanvasCache.get(element);
++    pending = false;
++    draw(0.1);
++    const loaded = elementWithCanvasCache.get(element)!;
++    expect(loaded).not.toBe(loading);
++    const context = loaded.canvas.getContext("2d")!;
++    expect(context.drawImage).toHaveBeenLastCalledWith(
++      ready,
++      0,
++      0,
++      80,
++      40,
++      0,
++      0,
++      100,
++      80,
++    );
++    const draws = (
++      context.drawImage as unknown as { mock: { calls: unknown[][] } }
++    ).mock.calls;
++    expect(draws.some((args) => args[0] === image)).toBe(false);
++  });
++  it("reuses a band and revisits older pixels, but replaces changed pixels at the same zoom", () => {
++    const { element, draw, cache, config } = setup();
++    draw(0.1);
++    const low = elementWithCanvasCache.get(element);
++    draw(0.12);
++    expect(elementWithCanvasCache.get(element)).toBe(low);
++    draw(0.3);
++    expect(elementWithCanvasCache.get(element)).not.toBe(low);
++    draw(0.1);
++    expect(elementWithCanvasCache.get(element)).toBe(low);
++    config.imageCache.get(element.fileId!)!.image =
++      document.createElement("img");
++    draw(0.1);
++    expect(elementWithCanvasCache.get(element)).not.toBe(low);
++    expect(cache.stats()).toMatchObject({ generated: 3, hits: 2 });
++  });
++
++  it("exports the original directly without generating or using tier canvases", () => {
++    const { element, image, context, config, draw, cache } = setup();
++    draw(0.1);
++    const stats = cache.stats();
++    const retained = elementWithCanvasCache.get(element);
++    config.isExporting = true;
++    draw(1);
++    expect(cache.stats()).toEqual(stats);
++    expect(elementWithCanvasCache.get(element)).toBe(retained);
++    expect(context.drawImage).toHaveBeenLastCalledWith(
++      image,
++      0,
++      0,
++      100,
++      80,
++      0,
++      0,
++      100,
++      80,
++    );
++  });
++});
+diff --git a/packages/excalidraw/components/App.tsx b/packages/excalidraw/components/App.tsx
+index bdb5c0e..62d9af5 100644
+--- a/packages/excalidraw/components/App.tsx
++++ b/packages/excalidraw/components/App.tsx
+@@ -4,6 +4,11 @@ import React, { useContext } from "react";
+ import { flushSync } from "react-dom";
+ import rough from "roughjs/bin/rough";
+ import { nanoid } from "nanoid";
++import { elementWithCanvasCache } from "@excalidraw/element/renderElement"; // zsviczian -- invalidate display-only image sources
++import {
++  clearImageZoomCache,
++  getImageZoomCache,
++} from "@excalidraw/element/imageZoomCache"; // zsviczian -- retained image tiers
+ 
+ import {
+   clamp,
+@@ -707,6 +712,45 @@ class App extends React.Component<AppProps, AppState> {
+ 
+   public files: BinaryFiles = {};
+   public imageCache: AppClassProperties["imageCache"] = new Map();
++  /** zsviczian -- Read-only per-editor image canvas cache diagnostics. */
++  public getImageRenderCacheStats = () =>
++    getImageZoomCache(this.imageCache).stats();
++  // zsviczian START -- display sources are isolated from files and imageCache
++  private imageRenderSourceProvider:
++    | import("@excalidraw/element/imageRenderSource").ImageRenderSourceProvider
++    | null = null; // zsviczian -- per-editor readiness
++  /** zsviczian -- Install an ephemeral display provider without changing original files. */
++  public setImageRenderSourceProvider = (
++    provider: typeof this.imageRenderSourceProvider,
++  ) => {
++    if (this.unmounted) return;
++    this.imageRenderSourceProvider = provider;
++    this.refreshImageRenderSources(
++      new Set(
++        this.scene
++          .getNonDeletedElements()
++          .filter(isImageElement)
++          .map((element) => element.fileId)
++          .filter((id): id is NonNullable<typeof id> => !!id),
++      ),
++    );
++  };
++  /** zsviczian -- Worker completion invalidates only affected image canvases. */
++  public refreshImageRenderSources = (ids: ReadonlySet<string>) => {
++    if (this.unmounted) return;
++    for (const element of this.scene.getNonDeletedElements()) {
++      if (
++        isImageElement(element) &&
++        element.fileId &&
++        ids.has(element.fileId)
++      ) {
++        elementWithCanvasCache.delete(element);
++      }
++    }
++    this.forceUpdate();
++  };
++
++  // zsviczian END
+   private iFrameRefs = new Map<ExcalidrawElement["id"], HTMLIFrameElement>();
+   /**
+    * Indicates whether the embeddable's url has been validated for rendering.
+@@ -865,6 +909,9 @@ class App extends React.Component<AppProps, AppState> {
+       setViewport: this.viewport.setViewport,
+       getViewportOffsets: this.viewport.getOffsets,
+       setElementRenderOverrides: this.setElementRenderOverrides,
++      setImageRenderSourceProvider: this.setImageRenderSourceProvider, // zsviczian -- pending pixels avoid original decode
++      refreshImageRenderSources: this.refreshImageRenderSources, // zsviczian -- worker completion
++      getImageRenderCacheStats: this.getImageRenderCacheStats, // zsviczian -- cache diagnostics
+       getSceneElements: this.getSceneElements,
+       getAppState: () => this.state,
+       getFiles: () => this.files,
+@@ -2794,6 +2841,8 @@ class App extends React.Component<AppProps, AppState> {
+                             appState={this.state}
+                             renderConfig={{
+                               imageCache: this.imageCache,
++                              imageRenderSourceProvider:
++                                this.imageRenderSourceProvider, // zsviczian -- display readiness
+                               isExporting: false,
+                               renderGrid: isGridModeEnabled(this),
+                               renderLinks: this.isLinksEnabled(),
+@@ -3725,6 +3774,7 @@ class App extends React.Component<AppProps, AppState> {
+     (opts?: { resetLoadingState: boolean }) => {
+       this.elementRenderOverrides = new Map();
+       this.elementRenderOffsets = new Map();
++      clearImageZoomCache(this.imageCache); // zsviczian -- file-scoped image tiers
+       this.scene.replaceAllElements([]);
+       this.setState((state) => ({
+         ...getDefaultAppState(),
+@@ -4118,6 +4168,8 @@ class App extends React.Component<AppProps, AppState> {
+     this.props.onExcalidrawAPI?.(null);
+     this.elementRenderOverrides = new Map();
+     this.elementRenderOffsets = new Map();
++    clearImageZoomCache(this.imageCache); // zsviczian -- deterministic image tier teardown
++    this.imageRenderSourceProvider = null; // zsviczian -- release host callback
+ 
+     (this.ownerWindow as any).launchQueue?.setConsumer(() => {});
+ 
+diff --git a/packages/excalidraw/scene/types.ts b/packages/excalidraw/scene/types.ts
+index c35ee07..b78648d 100644
+--- a/packages/excalidraw/scene/types.ts
++++ b/packages/excalidraw/scene/types.ts
+@@ -30,6 +30,12 @@ export type StaticCanvasRenderConfig = {
+   // extra options passed to the renderer
+   // ---------------------------------------------------------------------------
+   imageCache: AppClassProperties["imageCache"];
++  /** zsviczian -- synchronous display readiness, owned by this editor's host. */
++  imageRenderSourceProvider?:
++    | import("@excalidraw/element/imageRenderSource").ImageRenderSourceProvider
++    | null;
++  /** zsviczian -- resolved once per element draw; null prevents original decoding. */
++  preparedImageSource?: ImageBitmap | null;
+   renderGrid: boolean;
+   /** whether to render link icons on elements with links (never rendered
+    when exporting). @default true */
+diff --git a/packages/excalidraw/types.ts b/packages/excalidraw/types.ts
+index 1fadefc..d775a06 100644
+--- a/packages/excalidraw/types.ts
++++ b/packages/excalidraw/types.ts
+@@ -1445,6 +1445,17 @@ export interface ExcalidrawImperativeAPI {
+     redo: InstanceType<typeof App>["redo"]; //zsviczian
+   };
+   setForceRenderAllEmbeddables: InstanceType<typeof App>["setForceRenderAllEmbeddables"]; //zsviczian
++  /** zsviczian -- Per-editor display readiness; native exports bypass the provider. */
++  setImageRenderSourceProvider: InstanceType<
++    typeof App
++  >["setImageRenderSourceProvider"];
++  refreshImageRenderSources: InstanceType<
++    typeof App
++  >["refreshImageRenderSources"];
++  /** zsviczian -- Per-editor retained canvas counters; does not mutate rendering. */
++  getImageRenderCacheStats: InstanceType<
++    typeof App
++  >["getImageRenderCacheStats"];
+   zoomToFit: InstanceType<typeof App>["zoomToFit"]; //zsviczian
+   refreshEditorInterface: InstanceType<typeof App>["refreshEditorInterface"]; //zsviczian
+   isTouchScreen: InstanceType<typeof App>["isTouchScreen"]; //zsviczian

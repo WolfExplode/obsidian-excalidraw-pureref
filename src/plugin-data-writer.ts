@@ -1,5 +1,5 @@
-/** The two top-level records this host plugin owns in Obsidian's data.json. */
-export type PluginDataSection = "geometry" | "hotkeys";
+/** Domain records this host plugin owns in Obsidian's data.json. */
+export type PluginDataSection = "geometry" | "hotkeys" | "imageNavigation";
 
 /**
  * The Obsidian persistence seam used in production by Plugin and in tests by
