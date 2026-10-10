@@ -73,6 +73,14 @@ to a normal move so it cannot duplicate a newly clicked element.
   canvas" whenever exactly one element is selected; with nothing selected (or
   more than one element), Ctrl/Cmd+F still opens the native Find as usual.
 
+## Board selection count
+
+The main window's bottom-right status bar shows the active Board's selected
+element count and media count (images and embeds). Groups count their selected
+constituents individually. Deleted elements and temporary modal-transform
+helpers are excluded. With nothing selected it shows zero; outside a Board it
+is hidden. Editable Popouts continue to hide the status bar with other chrome.
+
 ## Popout defaults
 
 Editable PureRef Popouts are always-on-top and hide Obsidian chrome. They also
