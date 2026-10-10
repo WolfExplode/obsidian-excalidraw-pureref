@@ -45,6 +45,13 @@ to a normal move so it cannot duplicate a newly clicked element.
 
 ## Canvas context menu
 
+- **Select images with duplicates is added** when at least two images are
+  selected. It keeps every selected image whose source also appears in another
+  selected image and deselects unique images and any non-image elements.
+  Copies outside the selection do not count. Native and custom crops of the same
+  source count as duplicates, following Find Duplicates' shared crop policy.
+  If all selected images are unique, the selection is cleared. This works in
+  the normal Board view and editable Popouts.
 - **Show in Explorer is added** when exactly one image with a local vault file
   is selected. It opens Windows File Explorer with that file selected, in the
   normal Board view and editable Popouts. A custom crop reveals its generated
@@ -82,6 +89,9 @@ links, external image URLs, MIME types, and element types, case-insensitively.
 For example, `.jpg` finds JPEG images (including `.jpeg` and unnamed JPEG
 binaries), `.mp4` finds linked videos, and `rectangle` finds rectangle elements.
 Search does not inspect image pixels or the contents of embedded documents.
+Search treats `# ^ [ ] |` and the importer's full-width replacements as
+equivalent in both queries and metadata: `[AI]` also finds `［AI］` in filenames,
+paths, and links. Result labels retain the actual stored spelling.
 
 Click a metadata result to select and center it at the current zoom, or use
 **Select all matches** to select the matching elements together. Results update

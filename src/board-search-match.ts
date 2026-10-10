@@ -1,3 +1,5 @@
+import { desanitizeAttachmentName } from "./popout-drop-bridge";
+
 /** Search metadata only; Excalidraw retains its native text/frame-name results. */
 export interface BoardSearchCandidate {
 	id: string;
@@ -17,8 +19,11 @@ export interface BoardSearchMatch {
 }
 
 function searchable(value: string): string {
-	try { return decodeURIComponent(value).toLowerCase(); }
-	catch { return value.toLowerCase(); }
+	try { value = decodeURIComponent(value); }
+	catch { /* A malformed URI escape still permits a literal filename search. */ }
+	// Fold both queries and metadata through the importer's exact inverse map.
+	// Decode first so URL-encoded full-width characters match as well.
+	return desanitizeAttachmentName(value).toLowerCase();
 }
 
 export function matchBoardMetadata(candidates: readonly BoardSearchCandidate[], query: string): BoardSearchMatch[] {

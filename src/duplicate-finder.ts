@@ -4,6 +4,7 @@ import { isEditableTarget } from "./editable-target";
 import { findExcalidrawLeafForNode, getExcalidrawApi, getExcalidrawView, type SceneElement } from "./excalidraw-view";
 import { eventMatchesAnyBinding } from "./hotkey-match";
 import type { HotkeyStore } from "./hotkey-store";
+import { imageDuplicateSignature, selectedImagesWithDuplicates } from "./duplicate-images";
 
 /** The scene-element fields any type's duplicate signature might read. */
 interface DuplicateCandidateElement extends SceneElement {
@@ -22,22 +23,6 @@ interface DuplicateCandidateElement extends SceneElement {
 	points?: readonly (readonly [number, number])[];
 	crop?: { width: number; height: number } | null;
 	customData?: Record<string, unknown>;
-}
-
-/**
- * The fileId of the element's PureRef custom crop source, if it has one. A
- * hold-C crop drag (crop-orchestrator.ts) materializes its result as a brand
- * new image element pointing at a freshly generated image -- a distinct
- * `fileId` from the image it was cropped out of -- and records where it came
- * from in `customData[VIEWPORT_CROP_KEY].sourceFileId`. Without reading that
- * back, a custom-cropped image's own fileId never matches anything else on
- * the board, even the exact file it was cropped from.
- */
-function customCropSourceFileId(el: DuplicateCandidateElement): string | undefined {
-	const state = el.customData?.[VIEWPORT_CROP_KEY];
-	if (!state || typeof state !== "object") return undefined;
-	const sourceFileId = (state as { sourceFileId?: unknown }).sourceFileId;
-	return typeof sourceFileId === "string" ? sourceFileId : undefined;
 }
 
 /** Rounds away float noise (subpixel drift from resize/rotate) before it enters a signature string. */
@@ -66,7 +51,7 @@ function normalizedLink(link: string | null | undefined): string | null {
  * Whether a cropped image counts as a duplicate of the same source file's
  * other crops (including the uncropped original) -- both Excalidraw's native
  * crop and this plugin's own hold-C custom crop (see
- * customCropSourceFileId). Toggle to `false` to go back to treating each
+ * imageDuplicateSignature). Toggle to `false` to go back to treating each
  * distinct crop as its own thing -- e.g. if a board deliberately keeps
  * several different crops of one photo as separate references and those
  * shouldn't be flagged against each other.
@@ -86,7 +71,7 @@ const TREAT_CROPS_AS_DUPLICATES = true;
  * each was imported into the board -- this is exactly "does this image already
  * exist here", independent of size/position. Whether a different crop of that
  * same fileId also counts is gated by TREAT_CROPS_AS_DUPLICATES: when on, a
- * PureRef custom crop is traced back to customCropSourceFileId() so it keys on
+ * PureRef custom crop is traced back to its sourceFileId so it keys on
  * the file it was cropped FROM, not the disposable generated image it cropped
  * TO; when off, crop dimensions (native crop) or the element's own fileId
  * (custom crop) are folded into the signature so every distinct crop is kept
@@ -104,10 +89,7 @@ const TREAT_CROPS_AS_DUPLICATES = true;
  * per-type wiring at the call site.
  */
 function elementSignature(el: DuplicateCandidateElement): string | null {
-	if (el.type === "image" && el.fileId) {
-		if (TREAT_CROPS_AS_DUPLICATES) return `image:${customCropSourceFileId(el) ?? el.fileId}`;
-		return `image:${el.fileId}:${round(el.crop?.width)}x${round(el.crop?.height)}`;
-	}
+	if (el.type === "image") return imageDuplicateSignature(el, VIEWPORT_CROP_KEY, TREAT_CROPS_AS_DUPLICATES);
 	if (el.type === "embeddable") {
 		const link = normalizedLink(el.link);
 		return link ? `embeddable:${link}` : null;
@@ -183,7 +165,10 @@ function selectSceneElementIds(leaf: WorkspaceLeaf | null, ids: readonly string[
 	const view = getExcalidrawView(leaf);
 	if (!view?.excalidrawAPI || !view.updateScene) return false;
 	try {
-		view.updateScene({ appState: { selectedElementIds: Object.fromEntries(ids.map((id) => [id, true])) } });
+		view.updateScene({ appState: {
+			selectedElementIds: Object.fromEntries(ids.map((id) => [id, true])),
+			selectedGroupIds: {}, editingGroupId: null,
+		} });
 		return true;
 	} catch {
 		return false;
@@ -208,8 +193,26 @@ function runDuplicateSearch(leaf: WorkspaceLeaf | null): void {
 	new Notice(`Found ${count} duplicate${count === 1 ? "" : "s"} of this ${result.sourceType}. Selected on canvas.`);
 }
 
+function hasMultipleImagesSelected(leaf: WorkspaceLeaf): boolean {
+	const api = getExcalidrawApi(leaf);
+	if (!api?.getSceneElements) return false;
+	const ids = api.getAppState().selectedElementIds ?? {};
+	return api.getSceneElements().filter(element => !element.isDeleted && element.type === "image" && ids[element.id]).length >= 2;
+}
+
+function selectImagesWithDuplicates(leaf: WorkspaceLeaf): void {
+	const api = getExcalidrawApi(leaf);
+	if (!api?.getSceneElements) return;
+	const ids = selectedImagesWithDuplicates(
+		api.getSceneElements(), api.getAppState().selectedElementIds ?? {}, VIEWPORT_CROP_KEY, TREAT_CROPS_AS_DUPLICATES,
+	);
+	if (selectSceneElementIds(leaf, ids) && !ids.length) new Notice("No duplicate images in the selection. Selection cleared.");
+}
+
 /**
- * Adds a "Find Duplicates" entry to Excalidraw's native canvas context menu,
+ * Adds duplicate actions to Excalidraw's native canvas context menu:
+ * "Select images with duplicates" filters a multi-image selection;
+ * "Find Duplicates" searches the Board from one selected element,
  * shown only when exactly one element is selected, and rebinds Ctrl/Cmd+F to
  * the same search while a single element is selected. Mirrors
  * image-normalize.ts's menu-injection approach (append a `<li>` matching
@@ -230,35 +233,44 @@ export function attachDuplicateFinder(win: Window, app: App, hotkeys: HotkeyStor
 		event.stopImmediatePropagation();
 		runDuplicateSearch(leaf);
 	};
+	let pending: { leaf: WorkspaceLeaf; previousMenu: Element | null } | null = null;
+	const inject = () => {
+		if (!pending) return;
+		const { leaf, previousMenu } = pending;
+		const menu = leaf.view.containerEl.ownerDocument.querySelector(".context-menu");
+		if (!menu || menu === previousMenu) return;
+		pending = null;
+		observer.disconnect();
+		if (menu.querySelector(".epr-find-duplicates-menu")) return;
+		const multipleImages = hasMultipleImagesSelected(leaf);
+		if (!multipleImages && !hasSingleElementSelected(leaf)) return;
+		const item = menu.createEl("li", { cls: "epr-find-duplicates-menu" });
+		const button = item.createEl("button", { cls: "context-menu-item", attr: { type: "button" } });
+		button.createDiv({ cls: "context-menu-item__label", text: multipleImages ? "Select images with duplicates" : "Find Duplicates" });
+		button.addEventListener("click", (click) => {
+			click.stopPropagation();
+			// Hide the React-owned popover before selection changes trigger a render.
+			menu.parentElement?.setCssStyles({ display: "none" });
+			if (multipleImages) selectImagesWithDuplicates(leaf);
+			else runDuplicateSearch(leaf);
+		});
+	};
+	const observer = new MutationObserver(inject);
 	const onContextMenu = (event: MouseEvent) => {
+		observer.disconnect();
 		const leaf = findExcalidrawLeafForNode(app, event.target as Node | null);
-		if (!leaf) return;
-		win.setTimeout(() => {
-			const menu = win.document.querySelector(".context-menu");
-			if (!menu || menu.querySelector(".epr-find-duplicates-menu")) return;
-			if (!hasSingleElementSelected(leaf)) return;
-			const item = menu.createEl("li", { cls: "epr-find-duplicates-menu" });
-			item.createEl("button", { cls: "context-menu-item", attr: { type: "button" } })
-				.createDiv({ cls: "context-menu-item__label", text: "Find Duplicates" });
-			item.addEventListener("click", (click) => {
-				click.stopPropagation();
-				// Hide, don't remove: runDuplicateSearch below changes
-				// selectedElementIds, which can make Excalidraw's own menu
-				// component try to re-render/unmount itself on the same tick. If
-				// we'd already yanked the node out with .remove(), that reconcile
-				// targets a DOM node that's no longer there and throws (blanking
-				// the canvas until the file is reopened) -- the exact failure mode
-				// documented in context-menu-trim.ts for this same native menu.
-				const popover = menu.parentElement;
-				if (popover) popover.setCssStyles({ display: "none" });
-				runDuplicateSearch(leaf);
-			});
-		}, 0);
+		const doc = leaf?.view.containerEl.ownerDocument;
+		pending = leaf && doc ? { leaf, previousMenu: doc.querySelector(".context-menu") } : null;
+		// The native menu's insertion is observable; no timing delay is needed.
+		if (pending && doc) observer.observe(doc.body, { childList: true, subtree: true });
 	};
 	win.addEventListener("contextmenu", onContextMenu, true);
 	win.addEventListener("keydown", onKeyDown, true);
 	return () => {
+		pending = null;
+		observer.disconnect();
 		win.removeEventListener("contextmenu", onContextMenu, true);
 		win.removeEventListener("keydown", onKeyDown, true);
+		win.document.querySelectorAll(".epr-find-duplicates-menu").forEach(item => item.remove());
 	};
 }
