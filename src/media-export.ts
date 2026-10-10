@@ -1,5 +1,6 @@
 import { Notice, requestUrl, type App, type TFile, type WorkspaceLeaf } from "obsidian";
 import { isExcalidrawLeaf } from "./excalidraw-view";
+import { withBoardActivity } from "./board-activity";
 import { localLinkpath } from "./board-render";
 import { pickDirectoryForDomWindow } from "./electron";
 import { decodeImageDataURL, externalImageExportName, resolveImageExportSource, type ExportImageRecord } from "./media-export-source";
@@ -293,43 +294,45 @@ export async function exportSelectedMedia(app: App, leaf: WorkspaceLeaf): Promis
 	}
 	const { fs, path } = nodeModules;
 
-	let exported = 0;
-	let failed = 0;
-	for (const item of items) {
-		try {
-			if (item.kind === "copy") {
-				const data = await app.vault.readBinary(item.sourceFile);
-				const dest = uniqueDestPath(fs, path, dir, item.sourceFile.name);
-				await fs.promises.writeFile(dest, new Uint8Array(data));
-			} else if (item.kind === "crop") {
-				const data = await renderCroppedPng(win, item.dataURL, item.crop, item.flipX, item.flipY);
-				const dest = uniqueDestPath(fs, path, dir, `${item.sourceFile.basename}.png`);
-				await fs.promises.writeFile(dest, new Uint8Array(data));
-			} else {
-				const source = await readExternalImage(item, fs);
-				let name = externalImageExportName(item.url, source.mimeType, item.fileId);
-				let bytes = source.bytes;
-				if (item.crop) {
-					const blobUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer], { type: source.mimeType }));
-					try {
-						bytes = new Uint8Array(await renderCroppedPng(win, blobUrl, item.crop, item.flipX, item.flipY));
-					} finally {
-						URL.revokeObjectURL(blobUrl);
+	await withBoardActivity(leaf, "Exporting selected media…", async () => {
+		let exported = 0;
+		let failed = 0;
+		for (const item of items) {
+			try {
+				if (item.kind === "copy") {
+					const data = await app.vault.readBinary(item.sourceFile);
+					const dest = uniqueDestPath(fs, path, dir, item.sourceFile.name);
+					await fs.promises.writeFile(dest, new Uint8Array(data));
+				} else if (item.kind === "crop") {
+					const data = await renderCroppedPng(win, item.dataURL, item.crop, item.flipX, item.flipY);
+					const dest = uniqueDestPath(fs, path, dir, `${item.sourceFile.basename}.png`);
+					await fs.promises.writeFile(dest, new Uint8Array(data));
+				} else {
+					const source = await readExternalImage(item, fs);
+					let name = externalImageExportName(item.url, source.mimeType, item.fileId);
+					let bytes = source.bytes;
+					if (item.crop) {
+						const blobUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer], { type: source.mimeType }));
+						try {
+							bytes = new Uint8Array(await renderCroppedPng(win, blobUrl, item.crop, item.flipX, item.flipY));
+						} finally {
+							URL.revokeObjectURL(blobUrl);
+						}
+						name = `${path.basename(name, path.extname(name))}.png`;
 					}
-					name = `${path.basename(name, path.extname(name))}.png`;
+					await fs.promises.writeFile(uniqueDestPath(fs, path, dir, name), bytes);
 				}
-				await fs.promises.writeFile(uniqueDestPath(fs, path, dir, name), bytes);
+				exported++;
+			} catch (error) {
+				failed++;
+				console.error("[Excalidraw PureRef] failed to export media item:", error);
 			}
-			exported++;
-		} catch (error) {
-			failed++;
-			console.error("[Excalidraw PureRef] failed to export media item:", error);
 		}
-	}
 
-	new Notice(
-		failed === 0
-			? `Exported ${exported} file${exported === 1 ? "" : "s"} to ${dir}`
-			: `Exported ${exported} file${exported === 1 ? "" : "s"} to ${dir} (${failed} failed — see console)`,
-	);
+		new Notice(
+			failed === 0
+				? `Exported ${exported} file${exported === 1 ? "" : "s"} to ${dir}`
+				: `Exported ${exported} file${exported === 1 ? "" : "s"} to ${dir} (${failed} failed — see console)`,
+		);
+	});
 }

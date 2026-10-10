@@ -1,4 +1,5 @@
 import { Plugin, WorkspaceWindow } from "obsidian";
+import { registerBoardActivityCleanup } from "src/board-activity";
 import { GeometryStore } from "src/geometry-store";
 import { PopoutManager } from "src/popout-manager";
 import { ExcalidrawPureRefSettingTab } from "src/settings-tab";
@@ -58,6 +59,7 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 	}
 
 	async onload(): Promise<void> {
+		registerBoardActivityCleanup(this);
 		this.recordDiagnostic("plugin-load");
 		// One writer serializes every read-modify-write transaction against this
 		// plugin's data.json; the domain stores retain their own state/interfaces.

@@ -9,6 +9,7 @@ find the right context before changing code or investigating behavior.
 | --- | --- | --- |
 | Understand a user-visible gesture, shortcut, or board behavior | [Behavior](behavior/) | [Interaction overrides](behavior/user-interaction-overrides.md) |
 | Control a GIF or extract a frame | [GIF controls](behavior/gif-controls.md) | — |
+| Understand calculation and import feedback | [Board activity](behavior/board-activity.md) | — |
 | Change code that crosses an Obsidian, Excalidraw, Electron, or plugin boundary | [Integrations](integrations/) | The guide for that boundary |
 | Understand a durable architectural or product decision | [ADRs](adr/) | The ADR covering the decision |
 | Understand Popout ownership and lifecycle | [Popout lifecycle](popout-lifecycle.md) | [Window event listeners](integrations/obsidian-window-event-listeners.md) |

@@ -36,3 +36,20 @@ export function selectedImagesWithDuplicates(
 	}
 	return keyed.filter(({ signature }) => signature && counts.get(signature)! > 1).map(({ id }) => id);
 }
+
+/** Delete later selected copies, keeping the first live image of each source in Board order. */
+export function selectedDuplicateImageIdsToDelete(
+	elements: readonly DuplicateImageCandidate[], selectedIds: Readonly<Record<string, boolean>>,
+	cropKey: string, treatCropsAsDuplicates: boolean,
+): string[] {
+	const seen = new Set<string>();
+	const duplicates: string[] = [];
+	for (const element of elements) {
+		if (element.isDeleted || !selectedIds[element.id]) continue;
+		const signature = imageDuplicateSignature(element, cropKey, treatCropsAsDuplicates);
+		if (!signature) continue;
+		if (seen.has(signature)) duplicates.push(element.id);
+		else seen.add(signature);
+	}
+	return duplicates;
+}

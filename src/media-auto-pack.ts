@@ -1,4 +1,5 @@
 import type { WorkspaceLeaf } from "obsidian";
+import { beginBoardActivity, paintBoardActivity } from "./board-activity";
 import type ExcalidrawPureRefPlugin from "../main";
 import { localLinkpath } from "./board-render";
 import { getSceneElementFile, isExcalidrawLeaf, optimalPackElementsById, readSceneElements, setSelection } from "./excalidraw-view";
@@ -52,6 +53,7 @@ interface Transaction {
 	fallbackTimer: number | null;
 	/** Removes a transaction that stops making progress; never triggers packing. */
 	expiryTimer: number | null;
+	finishActivity: () => void;
 }
 
 /**
@@ -140,6 +142,8 @@ function seedTransaction(plugin: ExcalidrawPureRefPlugin, leaf: WorkspaceLeaf, f
 		readyToPack: false,
 		fallbackTimer: null,
 		expiryTimer: null,
+		// PureRef drops own their prompt and import feedback separately.
+		finishActivity: files.every(file => /\.pur$/i.test(file.name)) ? () => {} : beginBoardActivity(leaf, "Importing media…"),
 	};
 }
 
@@ -192,6 +196,7 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 				pending: transaction.candidates.filter((candidate) => !candidate.matchedId).map((candidate) => candidate.name),
 			});
 			state.transactions = state.transactions.filter((item) => item !== transaction);
+			transaction.finishActivity();
 		}, TRANSACTION_IDLE_EXPIRY_MS);
 	};
 
@@ -201,6 +206,8 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 		transaction.finalizing = true;
 		clearTransactionTimers(transaction);
 		try {
+			await paintBoardActivity(leaf);
+			if (!state.transactions.includes(transaction)) return;
 			if (transaction.convertAnimated) {
 				for (const candidate of transaction.candidates) {
 					const id = candidate.matchedId;
@@ -248,6 +255,7 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 			console.error("[Excalidraw PureRef] failed to finish a media import.", error);
 		} finally {
 			clearTransactionTimers(transaction);
+			transaction.finishActivity();
 			state.transactions = state.transactions.filter((item) => item !== transaction);
 		}
 	};
@@ -514,6 +522,7 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 	const teardown = (_leaf: WorkspaceLeaf, state: PackState) => {
 		for (const transaction of state.transactions) {
 			clearTransactionTimers(transaction);
+			transaction.finishActivity();
 		}
 		if (state.transactions.length) {
 			debug("subscription-torn-down-with-pending-transactions", {

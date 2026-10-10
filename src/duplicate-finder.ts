@@ -1,10 +1,11 @@
 import { Notice, type App, type WorkspaceLeaf } from "obsidian";
+import { paintBoardActivity, withBoardActivity } from "./board-activity";
 import { VIEWPORT_CROP_KEY } from "./crop-orchestrator";
 import { isEditableTarget } from "./editable-target";
 import { findExcalidrawLeafForNode, getExcalidrawApi, getExcalidrawView, type SceneElement } from "./excalidraw-view";
 import { eventMatchesAnyBinding } from "./hotkey-match";
 import type { HotkeyStore } from "./hotkey-store";
-import { imageDuplicateSignature, selectedImagesWithDuplicates } from "./duplicate-images";
+import { imageDuplicateSignature, selectedImagesWithDuplicates, selectedDuplicateImageIdsToDelete } from "./duplicate-images";
 
 /** The scene-element fields any type's duplicate signature might read. */
 interface DuplicateCandidateElement extends SceneElement {
@@ -209,9 +210,53 @@ function selectImagesWithDuplicates(leaf: WorkspaceLeaf): void {
 	if (selectSceneElementIds(leaf, ids) && !ids.length) new Notice("No duplicate images in the selection. Selection cleared.");
 }
 
+/** Route deletion through the target Board's native menu action, preserving bindings and undo. */
+async function deleteDuplicateImages(leaf: WorkspaceLeaf, nativeDelete: HTMLElement): Promise<void> {
+	await withBoardActivity(leaf, "Removing duplicate images…", async () => {
+		const api = getExcalidrawApi(leaf);
+		if (!api?.getSceneElements || !nativeDelete.isConnected) return;
+		const view = leaf.view;
+		const file = getExcalidrawView(leaf)?.file;
+		const selected = { ...api.getAppState().selectedElementIds };
+		const ids = selectedDuplicateImageIdsToDelete(api.getSceneElements(), selected, VIEWPORT_CROP_KEY, TREAT_CROPS_AS_DUPLICATES);
+		if (!ids.length) { new Notice("No duplicate images in the selection."); return; }
+		if (!selectSceneElementIds(leaf, ids)) return;
+		// ExcalidrawView.updateScene flushes app-state writes synchronously.
+		// Verify the exact selection before invoking the still-mounted native menu.
+		const sameBoard = () => leaf.view === view && getExcalidrawView(leaf)?.file === file && view.containerEl.isConnected;
+		const selection = () => {
+			const current = api.getAppState().selectedElementIds ?? {};
+			return Object.keys(current).filter(id => current[id]);
+		};
+		const ready = selection();
+		// Never allow native deletion to act on an old or user-changed selection.
+		if (!sameBoard() || ready.length !== ids.length || !ids.every(id => ready.includes(id))) return;
+		if (!nativeDelete.isConnected) {
+			selectSceneElementIds(leaf, Object.keys(selected).filter(id => selected[id]));
+			new Notice("Duplicate removal cancelled because the Board menu closed. Try again.");
+			return;
+		}
+		nativeDelete.click();
+		await paintBoardActivity(leaf);
+		if (!sameBoard()) return;
+		const live = new Set(api.getSceneElements().filter(el => !el.isDeleted).map(el => el.id));
+		const deleted = ids.filter(id => !live.has(id)).length;
+		// Native deletion clears selection. Retain surviving original selections,
+		// unless the user has already made a different selection while awaiting it.
+		const current = selection();
+		if (!current.length || current.length === ids.length && ids.every(id => current.includes(id))) {
+			selectSceneElementIds(leaf, Object.keys(selected).filter(id => selected[id] && live.has(id)));
+		}
+		new Notice(deleted === ids.length
+			? `Removed ${deleted} duplicate image${deleted === 1 ? "" : "s"}. Kept one image per source in the selection.`
+			: "Duplicate removal did not complete. Check the selection and try again.");
+	});
+}
+
 /**
  * Adds duplicate actions to Excalidraw's native canvas context menu:
  * "Select images with duplicates" filters a multi-image selection;
+ * "Delete duplicate images" keeps one selected image per source;
  * "Find Duplicates" searches the Board from one selected element,
  * shown only when exactly one element is selected, and rebinds Ctrl/Cmd+F to
  * the same search while a single element is selected. Mirrors
@@ -254,6 +299,21 @@ export function attachDuplicateFinder(win: Window, app: App, hotkeys: HotkeyStor
 			if (multipleImages) selectImagesWithDuplicates(leaf);
 			else runDuplicateSearch(leaf);
 		});
+		const nativeDelete = menu.querySelector<HTMLElement>('[data-testid="deleteSelectedElements"]');
+		if (multipleImages && nativeDelete) {
+			const deleteItem = menu.createEl("li", { cls: "epr-find-duplicates-menu" });
+			const deleteButton = deleteItem.createEl("button", { cls: "context-menu-item dangerous", attr: { type: "button" } });
+			deleteButton.createDiv({ cls: "context-menu-item__label", text: "Delete duplicate images" });
+			deleteButton.title = "Keep the first selected image of each source; remove its other selected copies";
+			deleteButton.addEventListener("click", click => {
+				click.stopPropagation();
+				menu.parentElement?.setCssStyles({ display: "none" });
+				void deleteDuplicateImages(leaf, nativeDelete).catch(error => {
+					console.error("[Excalidraw PureRef] duplicate removal failed", error);
+					new Notice("Could not remove duplicate images. Check the Board selection.");
+				});
+			});
+		}
 	};
 	const observer = new MutationObserver(inject);
 	const onContextMenu = (event: MouseEvent) => {

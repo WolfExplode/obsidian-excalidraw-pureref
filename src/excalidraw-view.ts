@@ -1,4 +1,5 @@
 import type { App, TFile, WorkspaceLeaf } from "obsidian";
+import { withBoardActivity } from "./board-activity";
 import {
 	isPackable,
 	planPack,
@@ -908,6 +909,11 @@ export function resetSelectedRotation(leaf: WorkspaceLeaf | null): boolean {
  * Returns false when the selection holds no image that needs resizing.
  */
 export async function resetSelectedImageScale(leaf: WorkspaceLeaf | null): Promise<boolean> {
+	if (!leaf) return false;
+	return await withBoardActivity(leaf, "Calculating image scale…", () => calculateResetImageScale(leaf)) ?? false;
+}
+
+async function calculateResetImageScale(leaf: WorkspaceLeaf): Promise<boolean> {
 	const api = getExcalidrawApi(leaf);
 	const view = getExcalidrawView(leaf);
 	if (!api?.getSceneElements || !api.getFiles || !view?.updateScene) return false;

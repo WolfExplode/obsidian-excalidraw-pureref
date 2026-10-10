@@ -156,3 +156,37 @@ body.epr-popout-mode .view-content {
 /* Retain native text navigation; suppress its empty-state message only when
    the host plugin has results. React keeps ownership of the native nodes. */
 .epr-has-search-matches .layer-ui__search-count:not(:has(.result-nav)) { display: none; }
+.epr-board-activity {
+	position: absolute;
+	right: 16px;
+	bottom: 16px;
+	z-index: 1000;
+	pointer-events: none;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.epr-board-activity-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	box-shadow: 0 2px 10px #0003;
+	font-size: 13px;
+}
+.epr-board-activity-spinner {
+	width: 14px;
+	height: 14px;
+	border: 2px solid var(--background-modifier-border);
+	border-top-color: var(--interactive-accent);
+	border-radius: 50%;
+	animation: epr-activity-spin 0.8s linear infinite;
+}
+@keyframes epr-activity-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+	.epr-board-activity-spinner { animation: none; }
+}

@@ -45,6 +45,15 @@ to a normal move so it cannot duplicate a newly clicked element.
 
 ## Canvas context menu
 
+- **Delete duplicate images is added** beside Select images with duplicates
+  when at least two images are selected and the native Delete action is available.
+  It keeps the first selected image of each source in Board order and removes
+  its other selected copies. Images outside the selection and unique images
+  remain untouched. Native and custom crops follow the same source-identity
+  policy as Select images with duplicates. Deletion uses the target Board's
+  native Delete action for binding cleanup and undo; it does not delete vault
+  attachments. Surviving original selections remain selected. A spinner shows
+  while the operation runs. This works in normal Board views and editable Popouts.
 - **Select images with duplicates is added** when at least two images are
   selected. It keeps every selected image whose source also appears in another
   selected image and deselects unique images and any non-image elements.

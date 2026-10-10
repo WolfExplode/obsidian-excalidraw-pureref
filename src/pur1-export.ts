@@ -1,5 +1,6 @@
 import { Modal, Notice, Setting, base64ToArrayBuffer, type App, type TFile, type WorkspaceLeaf } from "obsidian";
 import { localLinkpath, snapshotEmbeddableFile } from "./board-render";
+import { beginBoardActivity, paintBoardActivity } from "./board-activity";
 import { pickPureRefExportPath, writeExternalFile } from "./electron";
 import { getExcalidrawApi, getExcalidrawData, getExcalidrawFileForLeaf, getExcalidrawView, type SceneElement } from "./excalidraw-view";
 import { writePureRef1Images, type PureRefExportImage, type PureRefExportText } from "./pur1-writer";
@@ -117,6 +118,7 @@ function chooseExportScope(app: App, version: "1.x" | "2.x", hasSelection: boole
 
 /** Export supported images and standalone text from the chosen Board scope. */
 export async function exportBoardToPureRef(app: App, leaf: WorkspaceLeaf, version: "1.x" | "2.x"): Promise<void> {
+	let finish = () => {};
 	try {
 		const board = getExcalidrawFileForLeaf(leaf);
 		const api = getExcalidrawApi(leaf);
@@ -138,6 +140,8 @@ export async function exportBoardToPureRef(app: App, leaf: WorkspaceLeaf, versio
 		const owner = getExcalidrawView(leaf)?.containerEl?.ownerDocument?.defaultView ?? window;
 		const destination = await pickPureRefExportPath(owner, `${board.basename}.pur`);
 		if (!destination) return;
+		finish = beginBoardActivity(leaf, "Exporting PureRef file…");
+		await paintBoardActivity(leaf);
 		const files = api.getFiles();
 		const images: PureRefExportImage[] = [];
 		const notes: PureRefExportText[] = [];
@@ -214,5 +218,7 @@ export async function exportBoardToPureRef(app: App, leaf: WorkspaceLeaf, versio
 	} catch (error) {
 		console.error("[Excalidraw PureRef] PureRef export failed", error);
 		new Notice(`PureRef export failed: ${error instanceof Error ? error.message : String(error)}`, 10000);
+	} finally {
+		finish();
 	}
 }

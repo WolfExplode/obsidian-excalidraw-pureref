@@ -1,5 +1,6 @@
 import { Modal, Notice, Setting, arrayBufferToBase64, base64ToArrayBuffer, type TFile, type WorkspaceLeaf } from "obsidian";
 import type ExcalidrawPureRefPlugin from "../main";
+import { withBoardActivity } from "./board-activity";
 import { pickPureRefFileForDomWindow, readExternalFile } from "./electron";
 import { DEFAULT_IMAGE_SCALE, clientToSceneCoords, findExcalidrawLeafForNode, getExcalidrawApi, getExcalidrawFileForLeaf, getExcalidrawView, readSceneView } from "./excalidraw-view";
 import { readPureRefScene, transformPoint, type Point, type PureRefImage, type PureRefItem, type PureRefScene } from "./pur2-reader";
@@ -369,9 +370,9 @@ export async function importPureRefFile(plugin: ExcalidrawPureRefPlugin, leaf: W
 		const target = importViewCenter(leaf);
 		const file = await pickPureRefFileForDomWindow(owner);
 		if (!file) return;
-		new Notice("Importing PureRef scene…");
-		const board = await importScene(plugin, leaf, file, await readExternalFile(file), target);
-		new Notice(`Imported PureRef scene into ${board}`);
+		const board = await withBoardActivity(leaf, "Importing PureRef file…", async () =>
+			importScene(plugin, leaf, file, await readExternalFile(file), target));
+		if (board) new Notice(`Imported PureRef scene into ${board}`);
 	} catch (error) {
 		console.error("[Excalidraw PureRef] import failed", error);
 		new Notice(`PureRef import failed: ${error instanceof Error ? error.message : String(error)}`, 10000);
@@ -400,9 +401,9 @@ export function promptPureRefDrop(
 		const batchElementIds: string[] = [];
 		for (const file of files) {
 			try {
-				new Notice(`Importing ${file.name}…`);
-				const board = await importScene(plugin, leaf, file.name, new Uint8Array(await file.arrayBuffer()), dropPoint, batchElementIds);
-				new Notice(`Imported ${file.name} into ${board}`);
+				const board = await withBoardActivity(leaf, `Importing ${file.name}…`, async () =>
+					importScene(plugin, leaf, file.name, new Uint8Array(await file.arrayBuffer()), dropPoint, batchElementIds));
+				if (board) new Notice(`Imported ${file.name} into ${board}`);
 			} catch (error) {
 				console.error("[Excalidraw PureRef] dropped file import failed", error);
 				new Notice(`PureRef import failed: ${error instanceof Error ? error.message : String(error)}`, 10000);

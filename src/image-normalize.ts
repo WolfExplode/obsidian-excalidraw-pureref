@@ -1,4 +1,5 @@
 import type { App, WorkspaceLeaf } from "obsidian";
+import { withBoardActivity } from "./board-activity";
 import { applySelectionTransform, findExcalidrawLeafForNode, type TransformElement } from "./excalidraw-view";
 import { captureElementRevisions } from "./excalidraw-element-mutation";
 import { chordMatches, describeBinding } from "./hotkey-match";
@@ -65,6 +66,11 @@ function hasNormalizableSelection(leaf: WorkspaceLeaf | null): boolean {
  * area, or native-image scale. Every resize is centred on the original image.
  */
 export async function normalizeSelectedImages(leaf: WorkspaceLeaf | null, mode: ImageNormalizeMode): Promise<boolean> {
+	if (!leaf || !hasNormalizableSelection(leaf)) return false;
+	return await withBoardActivity(leaf, "Normalizing images…", () => calculateNormalizedImages(leaf, mode)) ?? false;
+}
+
+async function calculateNormalizedImages(leaf: WorkspaceLeaf, mode: ImageNormalizeMode): Promise<boolean> {
 	const view = leaf?.view as unknown as ImageView | undefined;
 	const api = view?.excalidrawAPI;
 	if (!api) return false;

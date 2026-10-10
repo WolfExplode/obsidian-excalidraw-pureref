@@ -1,7 +1,10 @@
 import type { App } from "obsidian";
+import { withBoardActivity } from "./board-activity";
+import { isPackable } from "./pack-elements";
 import { isEditableTarget } from "./editable-target";
 import {
 	findExcalidrawLeafForNode,
+	getExcalidrawApi,
 	optimalPackSelectedElements,
 	packSelectedElements,
 } from "./excalidraw-view";
@@ -25,7 +28,8 @@ const KEY_TO_DIRECTION: Record<string, PackDirection> = {
  * We intercept in the *capture* phase on the window so we run before Excalidraw's
  * own keydown handler (bound on `document` in the bubble phase, which nudges
  * selected elements on arrows) and before Obsidian's command dispatch (which
- * owns Ctrl+Shift+P). Only when an arrange actually happens do we
+ * owns Ctrl+Shift+P). An eligible optimal arrange is queued after feedback
+ * paints; gravity packing remains synchronous. Only when an arrange is accepted do we
  * stopImmediatePropagation + preventDefault so the key is fully consumed;
  * otherwise we stay out of the way and let normal behavior run.
  *
@@ -39,7 +43,13 @@ export function attachPackKeydown(win: Window, app: App, hotkeys: HotkeyStore): 
 			// Optimal arrange: a full key binding (default Ctrl/Cmd+Shift+P, KeyP is layout-independent).
 			if (eventMatchesAnyBinding(event, hotkeys.get("pack-optimal"))) {
 				const leaf = findExcalidrawLeafForNode(app, event.target as Node | null);
-				return !!leaf && optimalPackSelectedElements(leaf);
+				const api = getExcalidrawApi(leaf);
+				if (!leaf || !api?.getSceneElements) return false;
+				const ids = api.getAppState().selectedElementIds ?? {};
+				if (api.getSceneElements().filter(el => ids[el.id] && isPackable(el)).length < 2) return false;
+				if (!event.repeat) void withBoardActivity(leaf, "Calculating optimal layout…", () => optimalPackSelectedElements(leaf))
+					.catch(error => console.error("[Excalidraw PureRef] optimal packing failed", error));
+				return true;
 			}
 			// Gravity pack: configurable modifier (default Ctrl/Cmd) + a fixed Arrow key.
 			if (!chordMatches(event, hotkeys.get("pack-gravity-modifier"))) return false;
