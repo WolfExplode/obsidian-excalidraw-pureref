@@ -12,6 +12,7 @@ import { attachInsertModalAutoConfirm } from "src/insert-modal-autoconfirm";
 import { attachImportConflictBatch } from "src/import-conflict-batch";
 import { attachVideoAspectCorrector } from "src/video-aspect";
 import { attachMediaAutoPack } from "src/media-auto-pack";
+import { attachGifControls } from "src/gif-controls";
 import { attachFrontOfEmbedRendering } from "src/front-of-embed-view";
 import { installCropDebugHook } from "src/crop-drag";
 import { attachRotationResetHotkey } from "src/rotation-reset-hotkey";
@@ -86,6 +87,7 @@ export default class ExcalidrawPureRefPlugin extends Plugin {
 		// Keep a multi-file import compact, like PureRef. The observer only packs
 		// media newly created by an import; it seeds existing Board content first.
 		this.register(attachMediaAutoPack(this));
+		this.register(attachGifControls(this));
 		this.register(attachImportConflictBatch(window.document));
 		this.register(attachPopoutDropBridge(window.document, {
 			alwaysBridge: false,
