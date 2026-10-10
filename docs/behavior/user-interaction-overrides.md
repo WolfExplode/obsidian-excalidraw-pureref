@@ -125,6 +125,12 @@ setting globally, the normal Board view is affected for that interval too.
   import writes can restore the original placement. Animated-image conversion
   saves a deletion marker for each source image so those later writes cannot
   bring back the original beside its packed embeddable.
+- Compatible plain images in a multi-file import are inserted together at the
+  next redraw, reducing repeated scene updates and save requests while retaining
+  Excalidraw's native image registration and save pipeline. Partial imports flush
+  without waiting for every file. Hidden views flush on a microtask; hiding a
+  view or disabling the host plugin also flushes queued images. Cursor-relative,
+  grouped, framed, bound, and other insertion types use their native path.
 - Dropped or pasted media is selected automatically after its import finishes,
   in the normal Board view and editable Popouts. A batch selects all its newly
   imported media together, including animated-image replacements, after packing

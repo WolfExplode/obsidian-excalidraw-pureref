@@ -6,6 +6,7 @@ import { desanitizeAttachmentName } from "./popout-drop-bridge";
 import { attachPerLeafScanner, onEvent, type LeafScannerApi, type LeafScannerHandle } from "./leaf-scanner";
 import { importFileMatchesVaultPath } from "./import-file-match";
 import { convertMultiDropAnimatedImage } from "./multi-animated-drop";
+import { attachImageImportBatch, type ImageInsertRequest } from "./image-import-batch";
 
 /**
  * Packs imported media only after every file in an observed import transaction
@@ -72,6 +73,7 @@ interface PackState {
 	detachDocument: () => void;
 	detachBoardSync: () => void;
 	detachBoardSave: () => void;
+	detachImageBatch: () => void;
 	known: Set<string>;
 	transactions: Transaction[];
 	pendingSaves: number;
@@ -79,6 +81,7 @@ interface PackState {
 	idleResolvers: Array<() => void>;
 	lastDropSignature: string | null;
 	lastDropWasTrusted: boolean;
+	imageInsertBatching: { batches: number; requests: number; elements: number };
 }
 
 function isMedia(el: MediaElement): boolean {
@@ -452,6 +455,7 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 			detachDocument: () => {},
 			detachBoardSync: () => {},
 			detachBoardSave: () => {},
+			detachImageBatch: () => {},
 			known,
 			transactions: [],
 			pendingSaves: 0,
@@ -459,10 +463,51 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 			idleResolvers: [],
 			lastDropSignature: null,
 			lastDropWasTrusted: false,
+			imageInsertBatching: { batches: 0, requests: 0, elements: 0 },
 		};
 		state.detachDocument = attachDocument(leaf, state);
 		state.detachBoardSync = trackNativeOperation(leaf, state, scanner, "synchronizeWithData", "pendingSyncs", "board-sync");
 		state.detachBoardSave = trackNativeOperation(leaf, state, scanner, "save", "pendingSaves", "board-save");
+		const view = leaf.view as unknown as {
+			addElements?: (request: ImageInsertRequest) => Promise<boolean>;
+			containerEl?: HTMLElement;
+		};
+		const doc = view.containerEl?.ownerDocument;
+		const win = doc?.defaultView;
+		if (typeof view.addElements === "function" && doc && win) {
+			const batch = attachImageImportBatch(view as { addElements(request: ImageInsertRequest): Promise<boolean> }, {
+				matches: (path, id) => state.transactions.some((transaction) =>
+					!transaction.finalizing && transaction.candidates.length > 1 &&
+					!transaction.baselineIds.has(id) && !state.known.has(id) &&
+					transaction.candidates.some((candidate) =>
+						candidate.matchedId === null && (candidate.paths.has(path) || importFileMatchesVaultPath(candidate.name, path))),
+				),
+				schedule: (flush) => {
+					// Group work for the next redraw, rather than a wall-clock settle
+					// delay. Hidden documents must not depend on suspended frames.
+					if (doc.visibilityState !== "visible") {
+						win.queueMicrotask(flush);
+						return () => {};
+					}
+					const frame = win.requestAnimationFrame(flush);
+					return () => win.cancelAnimationFrame(frame);
+				},
+				onBatch: (requests, elements) => {
+					state.imageInsertBatching.batches++;
+					state.imageInsertBatching.requests += requests;
+					state.imageInsertBatching.elements += elements;
+					debug("image-insert-batch", { requests, elements });
+				},
+			});
+			const onVisibilityChange = () => { if (doc.visibilityState !== "visible") batch.flush(); };
+			doc.addEventListener("visibilitychange", onVisibilityChange);
+			win.addEventListener("pagehide", batch.flush);
+			state.detachImageBatch = () => {
+				doc.removeEventListener("visibilitychange", onVisibilityChange);
+				win.removeEventListener("pagehide", batch.flush);
+				batch.detach();
+			};
+		}
 		return state;
 	};
 
@@ -481,6 +526,7 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 		state.transactions = [];
 		for (const resolve of state.idleResolvers.splice(0)) resolve();
 		state.detachDocument();
+		state.detachImageBatch();
 		state.detachBoardSync();
 		state.detachBoardSave();
 	};
@@ -512,6 +558,7 @@ export function attachMediaAutoPack(plugin: ExcalidrawPureRefPlugin): () => void
 					events: debugEvents,
 					subscriptions: scanner.entries().map(([leaf, state]) => ({
 						file: (leaf.view as unknown as { file?: { path?: string } }).file?.path,
+						imageInsertBatching: { ...state.imageInsertBatching },
 						transactions: state.transactions.map((transaction) => ({
 							readyToPack: transaction.readyToPack,
 							candidates: transaction.candidates.map((candidate) => ({
